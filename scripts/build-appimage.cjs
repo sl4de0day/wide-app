@@ -7,9 +7,9 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
-const SOURCE_DIR = path.join(DIST, 'wide-linux-x64');
-const VERSION = '1.681126';
-const APPIMAGE_NAME = `Wide-${VERSION}-x86_64.AppImage`;
+const SOURCE_DIR = path.join(DIST, 'wide-app-linux-x64');
+const VERSION = '0.191126';
+const APPIMAGE_NAME = `Wide-App-${VERSION}-x86_64.AppImage`;
 const APPIMAGE_OUT = path.join(DIST, APPIMAGE_NAME);
 const STAGE = path.join(DIST, '.appimage-staging');
 const TAR2SQFS = 'C:\\Users\\yusuf\\Downloads\\squashfs-tools-ng-1.3.2-mingw64\\bin\\tar2sqfs.exe';
@@ -18,6 +18,7 @@ if (fs.existsSync(STAGE)) {
   fs.rmSync(STAGE, { recursive: true, force: true });
 }
 fs.mkdirSync(STAGE, { recursive: true });
+fs.mkdirSync(RELEASE, { recursive: true });
 
 fs.cpSync(SOURCE_DIR, STAGE, { recursive: true });
 
@@ -25,12 +26,13 @@ const appRunContent = `#!/bin/sh
 SELF=$(readlink -f "$0")
 HERE=\${SELF%/*}
 export PATH="\${HERE}:\${PATH}"
-exec "\${HERE}/wide-launcher.sh" "$@"
+exec "\${HERE}/wide-app-launcher.sh" "$@"
 `;
 fs.writeFileSync(path.join(STAGE, 'AppRun'), appRunContent.replace(/\r\n/g, '\n'), 'utf8');
 
 fs.copyFileSync(path.join(ROOT, 'wide.desktop'), path.join(STAGE, 'wide.desktop'));
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(STAGE, 'wide.png'));
+fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(STAGE, 'wide-app.png'));
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(STAGE, '.DirIcon'));
 
 const rawTar = path.join(DIST, 'temp-appimage.tar');

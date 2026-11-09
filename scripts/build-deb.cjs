@@ -8,9 +8,9 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
-const SOURCE_DIR = path.join(DIST, 'wide-linux-x64');
-const VERSION = '1.681126';
-const DEB_NAME = `wide-ide_${VERSION}_amd64.deb`;
+const SOURCE_DIR = path.join(DIST, 'wide-app-linux-x64');
+const VERSION = '0.191126';
+const DEB_NAME = `wide-app_${VERSION}_amd64.deb`;
 const DEB_OUT = path.join(DIST, DEB_NAME);
 const STAGE = path.join(DIST, '.deb-staging');
 
@@ -18,9 +18,10 @@ if (fs.existsSync(STAGE)) {
   fs.rmSync(STAGE, { recursive: true, force: true });
 }
 fs.mkdirSync(STAGE, { recursive: true });
+fs.mkdirSync(RELEASE, { recursive: true });
 
 const DATA_DIR = path.join(STAGE, 'data');
-const OPT_WIDE = path.join(DATA_DIR, 'opt', 'wide');
+const OPT_WIDE = path.join(DATA_DIR, 'opt', 'wide-app');
 const USR_BIN = path.join(DATA_DIR, 'usr', 'bin');
 const APPS_DIR = path.join(DATA_DIR, 'usr', 'share', 'applications');
 const PIXMAPS = path.join(DATA_DIR, 'usr', 'share', 'pixmaps');
@@ -34,12 +35,14 @@ fs.mkdirSync(ICONS_DIR, { recursive: true });
 
 fs.cpSync(SOURCE_DIR, OPT_WIDE, { recursive: true });
 
-const binScript = '#!/bin/sh\nexec /opt/wide/wide-launcher.sh "$@"\n';
-fs.writeFileSync(path.join(USR_BIN, 'wide'), binScript.replace(/\r\n/g, '\n'), 'utf8');
+const binScript = '#!/bin/sh\nexec /opt/wide-app/wide-app-launcher.sh "$@"\n';
+fs.writeFileSync(path.join(USR_BIN, 'wide-app'), binScript.replace(/\r\n/g, '\n'), 'utf8');
 
 fs.copyFileSync(path.join(ROOT, 'wide.desktop'), path.join(APPS_DIR, 'wide.desktop'));
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(PIXMAPS, 'wide.png'));
+fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(PIXMAPS, 'wide-app.png'));
 fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(ICONS_DIR, 'wide.png'));
+fs.copyFileSync(path.join(ROOT, 'assets', 'logo.png'), path.join(ICONS_DIR, 'wide-app.png'));
 
 let totalBytes = 0;
 const md5s = [];
@@ -67,18 +70,18 @@ const installedSizeKb = Math.ceil(totalBytes / 1024);
 const CONTROL_DIR = path.join(STAGE, 'control');
 fs.mkdirSync(CONTROL_DIR, { recursive: true });
 
-const controlContent = `Package: wide-ide
+const controlContent = `Package: wide-app
 Version: ${VERSION}
 Section: devel
 Priority: optional
 Architecture: amd64
 Installed-Size: ${installedSizeKb}
 Maintainer: sl4de <sl4de0day@github>
-Homepage: https://github.com/sl4de0day/wide
+Homepage: https://github.com/sl4de0day/wide-app
 Depends: libgtk-3-0, libnss3, libasound2, libnotify4, libsecret-1-0, libxss1, libxtst6
-Description: Security-first IDE for the web stack
- Wide provides real-time vulnerability detection, built-in Catcher
- proxy, Pitcher API client and native-speed development experience.
+Description: Autonomous AI workspace and mission control for Wide
+ Wide App is the standalone AI chat and autonomous workspace client
+ designed for the Wide developer ecosystem.
 `;
 
 fs.writeFileSync(path.join(CONTROL_DIR, 'control'), controlContent.replace(/\r\n/g, '\n'), 'utf8');
@@ -98,7 +101,7 @@ function packAr(entries) {
     const mtime = String(entry.mtime || Math.floor(Date.now() / 1000)).padEnd(12, ' ').slice(0, 12);
     const uid = String(entry.uid || 0).padEnd(6, ' ').slice(0, 6);
     const gid = String(entry.gid || 0).padEnd(6, ' ').slice(0, 6);
-    const mode = (entry.mode || '100644').padEnd(8, ' ').slice(0, 8);
+    const mode = String(entry.mode || '100644').padEnd(8, ' ').slice(0, 8);
     const size = String(entry.data.length).padEnd(10, ' ').slice(0, 10);
     const fmag = '`\n';
     chunks.push(Buffer.from(name + mtime + uid + gid + mode + size + fmag, 'binary'));
@@ -110,14 +113,14 @@ function packAr(entries) {
   return Buffer.concat(chunks);
 }
 
-const debBuffer = packAr([
+const arData = packAr([
   { name: 'debian-binary', data: debianBinary, mode: '100644' },
   { name: 'control.tar.gz', data: fs.readFileSync(controlTarGz), mode: '100644' },
   { name: 'data.tar.xz', data: fs.readFileSync(dataTarXz), mode: '100644' },
 ]);
 
-fs.writeFileSync(DEB_OUT, debBuffer);
+fs.writeFileSync(DEB_OUT, arData);
 fs.copyFileSync(DEB_OUT, path.join(RELEASE, DEB_NAME));
-
 fs.rmSync(STAGE, { recursive: true, force: true });
-console.log('Successfully generated deb package: ' + DEB_OUT + ' (' + debBuffer.length + ' bytes)');
+
+console.log('Successfully generated deb package: ' + DEB_OUT + ' (' + arData.length + ' bytes)');

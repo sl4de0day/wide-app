@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Wide App
+Comment=Desktop-first autonomous AI engineering and chat companion for the Wide ecosystem
+Exec=/usr/bin/wide-app %F
+Icon=wide-app
+Terminal=false
+Type=Application
+Categories=Development;Utility;
+StartupWMClass=Wide App

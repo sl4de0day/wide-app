@@ -7,12 +7,14 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
-const VERSION = '1.681126';
-const RPM_NAME = `wide-ide-${VERSION}-1.x86_64.rpm`;
+const VERSION = '0.191126';
+const RPM_NAME = `wide-app-${VERSION}-1.x86_64.rpm`;
 const RPM_OUT = path.join(DIST, RPM_NAME);
 const NFPM = 'C:\\Users\\yusuf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\goreleaser.nfpm_Microsoft.Winget.Source_8wekyb3d8bbwe\\nfpm.exe';
 
-const nfpmConfig = `name: "wide-ide"
+fs.mkdirSync(RELEASE, { recursive: true });
+
+const nfpmConfig = `name: "wide-app"
 arch: "amd64"
 platform: "linux"
 version: "${VERSION}"
@@ -20,8 +22,8 @@ release: "1"
 section: "devel"
 priority: "optional"
 maintainer: "sl4de <sl4de0day@github>"
-description: "Security-first IDE for the web stack\\n Wide provides real-time vulnerability detection, built-in Catcher proxy & Pitcher API client."
-homepage: "https://github.com/sl4de0day/wide-ide"
+description: "Autonomous AI workspace and mission control for Wide\\n Wide App is the standalone AI chat and autonomous workspace client."
+homepage: "https://github.com/sl4de0day/wide-app"
 license: "GPL-3.0-or-later"
 depends:
   - gtk3
@@ -32,16 +34,20 @@ depends:
 rpm:
   compression: zstd
 contents:
-  - src: ./dist/wide-linux-x64
-    dst: /opt/wide
+  - src: ./dist/wide-app-linux-x64
+    dst: /opt/wide-app
   - src: ./wide.desktop
     dst: /usr/share/applications/wide.desktop
   - src: ./assets/logo.png
     dst: /usr/share/pixmaps/wide.png
   - src: ./assets/logo.png
+    dst: /usr/share/pixmaps/wide-app.png
+  - src: ./assets/logo.png
     dst: /usr/share/icons/hicolor/512x512/apps/wide.png
-  - src: /opt/wide/wide-launcher.sh
-    dst: /usr/bin/wide
+  - src: ./assets/logo.png
+    dst: /usr/share/icons/hicolor/512x512/apps/wide-app.png
+  - src: /opt/wide-app/wide-app-launcher.sh
+    dst: /usr/bin/wide-app
     type: symlink
 `;
 

@@ -16,61 +16,79 @@
 
 ---
 
-## Overview
+**Wide App is a desktop-first autonomous AI workspace and chat companion that brings intelligent pair programming, code refactoring, and security auditing into a focused, distraction-free environment. Bound directly to your local project folders, it executes commands, inspects code, and performs multi-step engineering workflows with zero IDE clutter.**
 
-Wide App brings the autonomous AI engineering agent capabilities of the Wide ecosystem into a focused, distraction-free desktop application. Powered by native project workspace integration, multi-model support, and conversational AI orchestration, Wide App allows you to direct full-stack coding tasks, architecture modifications, and security audits through natural language prompts.
+Wide App is a high-performance cross-platform application designed for speed and minimal resource usage:
+- **Windows:** Native Windows desktop shell running on Chromium runtime with hardware-accelerated rendering and automatic updates.
+- **Linux:** Lightweight Wayland/X11 host running on dedicated Chromium runtime with multi-distro packaging.
+- **Core Engine:** High-speed React renderer paired with multi-threaded Node.js backend sidecar and OpenCode integration.
 
-- **Prompt-Driven Engineering:** Autonomous AI agent with native tool execution (`read_file`, `write_file`, `edit_file`, `list_dir`, `search`, `run_command`) directly targeting your local project folders.
-- **Project-Centric Conversations:** Each conversation session is bound to an explicit local project directory, ensuring LLM operations and OpenCode runs strictly in your project files rather than temporary system folders.
-- **Multi-Model & Provider Freedom:** Connect to local offline models via **Ollama** or **OpenCode CLI**, or utilize cloud providers (**Claude**, **Gemini**, **DeepSeek**, **OpenAI**).
-- **Session History & Organization:** Pinned conversations, search across chats, grouped session timestamps, and quick switching across workspaces.
-- **Minimalist Desktop UX:** Custom lightweight shell with maximized launch, ASCII splash animation, zero clutter, and dark/light system theme adaptation.
+## Features
+
+- **Autonomous Agent.** A prompt-driven engineering loop with native tool execution (`read_file`, `write_file`, `edit_file`, `list_dir`, `run_command`, `web_search`) directly targeting your local workspace.
+- **Project Isolation.** Every conversation binds to an explicit project directory, ensuring AI operations strictly stay within designated project boundaries.
+- **AI Integration.** Pluggable multi-provider architecture supporting local offline inference via Ollama or OpenCode CLI, alongside cloud providers (Gemini, Claude, DeepSeek, OpenAI).
+- **Session Management.** Complete conversation history with fast search, message pinning, grouped timestamp categorization, and instant workspace switching.
+- **Desktop Experience.** Seamless ASCII logo splash animation on startup, maximized window management, and native dark/light theme adaptation.
 
 ## Installation
 
-### Pre-built Releases
-Download the latest executable from the [Releases](https://github.com/sl4de0day/wide-app/releases/latest) page.
+### Windows
+Download the latest `Wide-App-Setup-*.exe` from the [Releases](https://github.com/sl4de0day/wide-app/releases/latest) page and run it. Wide App installs per user, so no administrator rights are required, and it places convenient shortcuts on your desktop and start menu.
 
-### Building from Source
+### Linux
+Download the package corresponding to your Linux distribution from [Releases](https://github.com/sl4de0day/wide-app/releases/latest):
+- **Universal (.AppImage):**
+  ```bash
+  chmod +x Wide-App-*-x86_64.AppImage
+  ./Wide-App-*-x86_64.AppImage
+  ```
+- **Ubuntu / Debian / Kali / Mint (.deb):**
+  ```bash
+  sudo apt install ./wide-app_*_amd64.deb
+  ```
+- **Fedora / RHEL / openSUSE (.rpm):**
+  ```bash
+  sudo dnf install ./wide-app-*.rpm
+  ```
+- **Arch Linux / Manjaro (.pkg.tar.zst):**
+  ```bash
+  sudo pacman -U ./wide-app-*.pkg.tar.zst
+  ```
 
+Wide App on Linux features native Wayland support, high DPI scaling, and desktop launcher integration.
+
+## Building from source
+
+### Windows
 Requirements:
+- Windows (x64)
 - Node.js 18 or newer
 - npm
 
 ```bash
-git clone https://github.com/sl4de0day/wide-app.git
-cd wide-app
 npm install
-npm run build:renderer
-npm run build:backend
-npm start
+npm run build:linux
+node scripts/package-win.cjs
 ```
 
-## Quick Start
+### Linux
+Requirements:
+- Linux (x86_64)
+- Node.js 18 or newer
+- npm
 
-1. **Launch Wide App:**
-   Open the application. You are greeted with a clean workspace overview without distractions.
+```bash
+npm install
+npm run build:linux
 
-2. **Start a Conversation:**
-   Click **New conversation** (or press `Ctrl+L`). Select your local project directory in the native folder picker.
+npm run package:appimage
+npm run package:deb
+npm run package:rpm
+npm run package:arch
 
-3. **Prompt the Agent:**
-   Direct Wide Agent with your engineering prompt:
-   - "Refactor the authentication flow to use JWT tokens and secure HTTP-only cookies"
-   - "Scan this repository for SQL injection and fix all identified vulnerabilities"
-   - "Write comprehensive integration tests for the user payment endpoints"
-
-4. **Multi-Model Switching:**
-   Switch effortlessly between cloud reasoning models (DeepSeek-R1, Claude 3.7 Sonnet, Gemini 2.5 Flash) and local offline inference via Ollama or OpenCode CLI directly from the model picker.
-
-## Ecosystem Architecture
-
-| Component | Repository | Role |
-| :--- | :--- | :--- |
-| **Wide IDE** | [wide-ide](https://github.com/sl4de0day/wide-ide) | Security-first IDE with built-in pentest tools and AI agents |
-| **Wide CLI** | [wide-cli](https://github.com/sl4de0day/wide-cli) | Terminal-first autonomous AI coding & security agent |
-| **Wide SDK** | [wide-sdk](https://github.com/sl4de0day/wide-sdk) | Python framework for building custom autonomous coding and security agents |
-| **Wide App** | [wide-app](https://github.com/sl4de0day/wide-app) | Desktop-first autonomous AI engineering and chat companion |
+npm run package:all
+```
 
 ## License
 

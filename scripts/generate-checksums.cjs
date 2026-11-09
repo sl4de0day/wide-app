@@ -8,12 +8,7 @@ const ROOT = path.resolve(__dirname, '..');
 const RELEASE = path.join(ROOT, 'release');
 const DIST = path.join(ROOT, 'dist');
 
-const oldExe = path.join(RELEASE, 'Wide-Setup-1.3291026.exe');
-if (fs.existsSync(oldExe)) {
-  fs.unlinkSync(oldExe);
-}
-
-const files = fs.readdirSync(RELEASE).filter((f) => f.includes('1.681126'));
+const files = fs.readdirSync(RELEASE).filter((f) => f.includes('0.191126'));
 files.sort();
 
 const sums = [];
