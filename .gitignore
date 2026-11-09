@@ -1,0 +1,16 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+out/
+**/out/
+native-host/build/
+release/
+*.log
+installer/pkg/
+installer/src/
+installer/*.pkg.tar.*
+.vscode/
+scratch/
+.DS_Store
+Thumbs.db
