@@ -19,12 +19,12 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "sl4de"
       VALUE "FileDescription", "Wide"
-      VALUE "FileVersion", "0.291126"
+      VALUE "FileVersion", "0.3101126"
       VALUE "InternalName", "wide"
       VALUE "LegalCopyright", "Copyright (C) 2026 sl4de. GNU GPL v3."
       VALUE "OriginalFilename", "wide.exe"
       VALUE "ProductName", "Wide"
-      VALUE "ProductVersion", "0.291126"
+      VALUE "ProductVersion", "0.3101126"
     END
   END
   BLOCK "VarFileInfo"

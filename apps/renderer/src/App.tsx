@@ -48,6 +48,8 @@ import { Toasts } from "./components/Toasts";
 import { toast } from "./stores/toast";
 import { cn } from "./lib/utils";
 import { CrashReportDialog } from "./components/CrashReportDialog";
+import { AiBrowserDrawer } from "./components/AiBrowserDrawer";
+import { useAiBrowser } from "./stores/aiBrowser";
 import { useTelemetry } from "./stores/telemetry";
 import { useDiagnostics } from "./stores/diagnostics";
 import { subscribeFindingsProject, useFindings } from "./stores/findings";
@@ -657,6 +659,7 @@ export default function App() {
       { id: "view.catcher", title: "Catcher", group: "View", run: () => useEditor.getState().openCatcher() },
       { id: "view.pitcher", title: "Pitcher", group: "View", run: () => useEditor.getState().openPitcher() },
       { id: "view.browser", title: "Browser", group: "View", run: () => useEditor.getState().openBrowser() },
+      { id: "view.ai-browser", title: "AI Browser Stream", group: "View", run: () => useAiBrowser.getState().toggleDrawer() },
       { id: "view.scratchpad", title: "Scratchpad", group: "View", key: "ctrl+alt+n", run: () => useEditor.getState().openScratchpad() },
       { id: "catcher.proxy", title: "Catcher: Proxy", group: "Catcher", run: () => useCatcher.getState().show("proxy") },
       { id: "catcher.target", title: "Catcher: Target (Site Map)", group: "Catcher", run: () => useCatcher.getState().show("target") },
@@ -771,6 +774,7 @@ export default function App() {
       <PromptHost />
       <Toasts />
       <CrashReportDialog />
+      <AiBrowserDrawer />
     </div>
   );
 }
