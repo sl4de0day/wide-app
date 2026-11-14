@@ -25,6 +25,7 @@ export const SETTINGS_PATH = "wide://settings";
 export const HTTP_PATH = "wide://response";
 
 export const POLICY_PATH = "wide://policy";
+export const DATABASE_PATH = "wide://database";
 
 export const BROWSER_PATH = "wide://browser";
 
@@ -78,7 +79,7 @@ export interface FileTab {
 }
 
 export interface VirtualTab {
-  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef" | "markdown-preview" | "scratchpad";
+  kind: "settings" | "http" | "extension" | "ai-chat" | "policy" | "browser" | "diff" | "catcher" | "pitcher" | "cyberchef" | "markdown-preview" | "scratchpad" | "database";
   path: string;
   name: string;
   pinned?: boolean;
@@ -158,8 +159,10 @@ interface EditorState {
   openBrowser(): void;
 
   openCatcher(): void;
+  openCatcherToSide(): void;
 
   openPitcher(): void;
+  openDatabase(): void;
 
   openCyberchef(): void;
 
@@ -245,6 +248,49 @@ function activatePanePath(
 }
 
 const INITIAL_PANE_ID = "primary";
+
+function openVirtualSideAware(
+  get: () => EditorState,
+  set: (partial: Partial<EditorState>) => void,
+  tab: VirtualTab,
+  keepChatFocus = true,
+): void {
+  const state = get();
+  const leafIds = getLeafIds(state.layout);
+  const tabs = state.tabs.some((existing) => existing.path === tab.path)
+    ? state.tabs
+    : [...state.tabs, tab];
+  if (leafIds.some((id) => state.panes[id]?.activePath === tab.path)) {
+    if (tabs !== state.tabs) set({ tabs });
+    return;
+  }
+  const chatPaneId = leafIds.find((id) => state.panes[id]?.activePath?.startsWith(AI_CHAT_PATH));
+  if (chatPaneId) {
+    if (tabs !== state.tabs) set({ tabs });
+    const chatPath = state.panes[chatPaneId]?.activePath ?? state.activePath;
+    if (leafIds.length <= 1) {
+      get().splitPane(chatPaneId, "vertical", tab.path);
+      if (keepChatFocus) {
+        set({ activePaneId: chatPaneId, activePath: chatPath });
+      }
+    } else {
+      const otherPaneId = leafIds.find((id) => id !== chatPaneId) ?? leafIds[0];
+      const panes = activatePanePath(state.panes, otherPaneId, tab.path);
+      const splitPath = leafIds.length === 2 ? panes[leafIds[1]]?.activePath ?? null : null;
+      set({
+        tabs,
+        panes,
+        splitPath,
+        ...(keepChatFocus
+          ? { activePaneId: chatPaneId, activePath: chatPath }
+          : { activePaneId: otherPaneId, activePath: tab.path }),
+      });
+    }
+    return;
+  }
+  const panes = activatePanePath(state.panes, state.activePaneId, tab.path);
+  set({ tabs, activePath: tab.path, panes });
+}
 
 export const useEditor = create<EditorState>((set, get) => ({
   tabs: [],
@@ -594,6 +640,9 @@ export const useEditor = create<EditorState>((set, get) => ({
       };
     }),
 
+  openCatcherToSide: () =>
+    openVirtualSideAware(get, set, { kind: "catcher", path: CATCHER_PATH, name: "Catcher" }, true),
+
   openPitcher: () =>
     set((state) => {
       const panes = activatePanePath(state.panes, state.activePaneId, PITCHER_PATH);
@@ -603,6 +652,19 @@ export const useEditor = create<EditorState>((set, get) => ({
       return {
         tabs: [...state.tabs, { kind: "pitcher", path: PITCHER_PATH, name: "Pitcher" }],
         activePath: PITCHER_PATH,
+        panes,
+      };
+    }),
+
+  openDatabase: () =>
+    set((state) => {
+      const panes = activatePanePath(state.panes, state.activePaneId, DATABASE_PATH);
+      if (state.tabs.some((tab) => tab.path === DATABASE_PATH)) {
+        return { activePath: DATABASE_PATH, panes };
+      }
+      return {
+        tabs: [...state.tabs, { kind: "database", path: DATABASE_PATH, name: "Database" }],
+        activePath: DATABASE_PATH,
         panes,
       };
     }),

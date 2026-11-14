@@ -1,9 +1,11 @@
-import { ChevronLeft, Settings, ShieldAlert, X } from "lucide-react";
+import { ChevronLeft, Database, Settings, ShieldAlert, X } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { AiChatView } from "./components/AiChatView";
 import { AiPanel } from "./panels/AiPanel";
+import { DatabaseView } from "./components/DatabaseView";
+import { DatabasePanel } from "./panels/DatabasePanel";
 
 import { ActivityBar, panelById } from "./components/ActivityBar";
 import { EditorArea } from "./components/EditorArea";
@@ -53,7 +55,7 @@ import { useAiBrowser } from "./stores/aiBrowser";
 import { useTelemetry } from "./stores/telemetry";
 import { useDiagnostics } from "./stores/diagnostics";
 import { subscribeFindingsProject, useFindings } from "./stores/findings";
-import { AI_CHAT_PATH, SETTINGS_PATH, useEditor } from "./stores/editor";
+import { AI_CHAT_PATH, DATABASE_PATH, SETTINGS_PATH, useEditor } from "./stores/editor";
 import { subscribeAiEvents, subscribeAiPulls, useAi } from "./stores/ai";
 import { subscribeProxyTraffic } from "./stores/proxy";
 import { subscribeOast } from "./stores/oast";
@@ -199,6 +201,8 @@ export default function App() {
 
 
   const settingsOpen = useEditor((state) => state.activePath === SETTINGS_PATH);
+  const databaseOpen = useEditor((state) => state.activePath === DATABASE_PATH);
+  const [sidebarTab, setSidebarTab] = useState<"ai" | "db">("ai");
   const booting = useUpdate((state) => state.booting);
 
 
@@ -706,8 +710,31 @@ export default function App() {
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <div className="flex w-72 shrink-0 flex-col border-r border-line bg-panel">
+          <div className="flex shrink-0 border-b border-line bg-chrome p-1 text-[11px] font-medium">
+            <button
+              type="button"
+              onClick={() => setSidebarTab("ai")}
+              className={cn(
+                "flex-1 rounded px-2 py-1 transition-colors",
+                sidebarTab === "ai" ? "bg-surface text-ink" : "text-fg-dim hover:text-ink"
+              )}
+            >
+              {t("AI Assistant")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarTab("db")}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1 rounded px-2 py-1 transition-colors",
+                sidebarTab === "db" ? "bg-surface text-ink" : "text-fg-dim hover:text-ink"
+              )}
+            >
+              <Database className="size-3" />
+              {t("Database")}
+            </button>
+          </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            <AiPanel />
+            {sidebarTab === "db" ? <DatabasePanel /> : <AiPanel />}
           </div>
           <div className="flex shrink-0 items-center border-t border-line px-3 py-2 bg-chrome">
             <button
@@ -742,6 +769,28 @@ export default function App() {
               </div>
               <div className="min-h-0 flex-1">
                 <SettingsView />
+              </div>
+            </div>
+          ) : databaseOpen ? (
+            <div className="flex h-full flex-col bg-canvas">
+              <div
+                className="flex shrink-0 items-center border-b border-line px-2"
+                style={{ height: "var(--h-tabbar)" }}
+              >
+                <button
+                  type="button"
+                  onClick={() => closeTab(DATABASE_PATH)}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-fg-dim",
+                    "transition-colors duration-100 hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  <ChevronLeft className="size-3.5" strokeWidth={1.5} />
+                  {t("Back")}
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                <DatabaseView />
               </div>
             </div>
           ) : activeAiChatId ? (

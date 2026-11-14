@@ -1,4 +1,4 @@
-const WIDE_VERSION = "0.3101126";
+const WIDE_VERSION = "0.4141126";
 const WIDE_REPO = "sl4de0day/wide-app";
 const WIDE_ASSET_RE = /Wide-App-Setup-.*\.exe$/i;
 const WIDE_SUMS_RE = /^SHA256SUMS(\.txt)?$/i;

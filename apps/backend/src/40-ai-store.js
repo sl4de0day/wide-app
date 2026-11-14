@@ -389,6 +389,12 @@ function registerAiStoreHandlers() {
       }
     }
 
+    const ideDirs = ["wide-ide", "wide"];
+    const winSuffixes = [
+      ["dist", "wide", "wide.exe"],
+      ["native-host", "target", "release", "wide.exe"],
+      ["native-host", "target", "debug", "wide.exe"],
+    ];
     const candidates = [
       process.env.WIDE_IDE_PATH,
       process.env.WIDE_PATH,
@@ -398,19 +404,15 @@ function registerAiStoreHandlers() {
       node_path.join(process.env.PROGRAMFILES || "", "Wide", "wide.exe"),
       node_path.join(process.env["PROGRAMFILES(X86)"] || "", "Wide IDE", "wide.exe"),
       node_path.join(process.env["PROGRAMFILES(X86)"] || "", "Wide", "wide.exe"),
-      node_path.resolve(__dirname, "..", "..", "..", "wide", "dist", "wide", "wide.exe"),
-      node_path.resolve(__dirname, "..", "..", "..", "wide", "native-host", "target", "release", "wide.exe"),
-      node_path.resolve(__dirname, "..", "..", "..", "wide", "native-host", "target", "debug", "wide.exe"),
-      node_path.resolve(process.cwd(), "..", "wide", "dist", "wide", "wide.exe"),
-      node_path.resolve(process.cwd(), "..", "wide", "native-host", "target", "release", "wide.exe"),
-      node_path.resolve(process.cwd(), "..", "wide", "native-host", "target", "debug", "wide.exe"),
+      ...ideDirs.flatMap((dir) => winSuffixes.map((s) => node_path.resolve(__dirname, "..", "..", "..", dir, ...s))),
+      ...ideDirs.flatMap((dir) => winSuffixes.map((s) => node_path.resolve(process.cwd(), "..", dir, ...s))),
       "/usr/bin/wide",
       "/usr/local/bin/wide",
       node_path.join(process.env.HOME || "", ".local", "bin", "wide"),
       "/opt/wide/wide",
       "/opt/wide-ide/wide",
-      node_path.resolve(__dirname, "..", "..", "..", "wide", "native-host", "target", "release", "wide"),
-      node_path.resolve(process.cwd(), "..", "wide", "native-host", "target", "release", "wide"),
+      ...ideDirs.map((dir) => node_path.resolve(__dirname, "..", "..", "..", dir, "native-host", "target", "release", "wide")),
+      ...ideDirs.map((dir) => node_path.resolve(process.cwd(), "..", dir, "native-host", "target", "release", "wide")),
     ].filter(Boolean);
 
     let targetExe = null;

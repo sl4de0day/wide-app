@@ -8,7 +8,7 @@ const ROOT = path.resolve(__dirname, '..');
 const RELEASE = path.join(ROOT, 'release');
 const DIST = path.join(ROOT, 'dist');
 
-const files = fs.readdirSync(RELEASE).filter((f) => f.includes('0.3101126'));
+const files = fs.readdirSync(RELEASE).filter((f) => f.includes('0.4141126'));
 files.sort();
 
 const sums = [];
