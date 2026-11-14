@@ -1,6 +1,6 @@
 const WIDE_VERSION = "0.3101126";
-const WIDE_REPO = "sl4de0day/wide-ide";
-const WIDE_ASSET_RE = /Wide-Setup-.*\.exe$/i;
+const WIDE_REPO = "sl4de0day/wide-app";
+const WIDE_ASSET_RE = /Wide-App-Setup-.*\.exe$/i;
 const WIDE_SUMS_RE = /^SHA256SUMS(\.txt)?$/i;
 const WIDE_MAX_ATTEMPTS = 2;
 
@@ -30,7 +30,7 @@ function resolveStagedPath(version, assetName) {
     return node_path.join(node_os.tmpdir(), assetName);
   }
   const ext = process.platform === "win32" ? ".exe" : ".tar.gz";
-  const base = process.platform === "win32" ? "Wide-Setup-" : "wide-";
+  const base = process.platform === "win32" ? "Wide-App-Setup-" : "wide-app-";
   const suffix = process.platform === "win32" ? "" : "-linux-x64";
   return node_path.join(node_os.tmpdir(), `${base}${version || "latest"}${suffix}${ext}`);
 }
@@ -185,7 +185,7 @@ async function settleAttempt(latest) {
 
 async function checkGithubRelease() {
   const api = `https://api.github.com/repos/${WIDE_REPO}/releases/latest`;
-  const result = await fetchJson(api, { "User-Agent": "Wide", Accept: "application/vnd.github+json" });
+  const result = await fetchJson(api, { "User-Agent": "Wide-App", Accept: "application/vnd.github+json" });
   if (!result.ok) return { ok: false, error: result.error, current: WIDE_VERSION };
   const release = result.json || {};
   const latest = String(release.tag_name || release.name || "").replace(/^v/i, "");
