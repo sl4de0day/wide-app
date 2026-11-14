@@ -67,14 +67,34 @@ const pkg = {
 };
 fs.writeFileSync(path.join(APP_DIR, 'package.json'), JSON.stringify(pkg, null, 2), 'utf8');
 
-const PROD_MODULES = [
-  '@grpc',
-  '@lydell',
-  'node-forge',
-  'playwright-core',
-  'prettier',
-  'typescript',
-];
+function collectProdModules(rootDir, rootPkgJson) {
+  const seen = new Set();
+  const queue = Object.keys(rootPkgJson.dependencies || {});
+  const dirs = new Set();
+  while (queue.length > 0) {
+    const modName = queue.shift();
+    if (!modName || seen.has(modName)) continue;
+    seen.add(modName);
+    const modDir = path.join(rootDir, 'node_modules', modName);
+    const pkgPath = path.join(modDir, 'package.json');
+    if (!fs.existsSync(pkgPath)) continue;
+    dirs.add(modName.startsWith('@') ? modName.split('/')[0] : modName);
+    try {
+      const subPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      for (const dep of Object.keys(subPkg.dependencies || {})) {
+        queue.push(dep);
+      }
+      for (const opt of Object.keys(subPkg.optionalDependencies || {})) {
+        if (fs.existsSync(path.join(rootDir, 'node_modules', opt))) {
+          queue.push(opt);
+        }
+      }
+    } catch {}
+  }
+  return [...dirs].sort();
+}
+
+const PROD_MODULES = collectProdModules(ROOT, rootPkg);
 
 const destModules = path.join(APP_DIR, 'node_modules');
 fs.mkdirSync(destModules, { recursive: true });

@@ -267,10 +267,10 @@ async function handleSidecarMessage(msg) {
         }
       } else if (method === 'crypto:protect') {
         try {
-          const buf = Buffer.from(params.data || '', 'base64');
+          const rawB64 = String(params.data || '');
           const enc = safeStorage.isEncryptionAvailable()
-            ? safeStorage.encryptString(buf.toString('utf8')).toString('base64')
-            : buf.toString('base64');
+            ? safeStorage.encryptString('b64:' + rawB64).toString('base64')
+            : Buffer.from(rawB64, 'base64').toString('base64');
           result = { ok: true, data: enc };
         } catch {
           result = { ok: false };
@@ -278,10 +278,15 @@ async function handleSidecarMessage(msg) {
       } else if (method === 'crypto:unprotect') {
         try {
           const enc = Buffer.from(params.data || '', 'base64');
-          const dec = safeStorage.isEncryptionAvailable()
-            ? safeStorage.decryptString(enc)
-            : enc.toString('utf8');
-          result = { ok: true, data: Buffer.from(dec).toString('base64') };
+          if (safeStorage.isEncryptionAvailable()) {
+            const dec = safeStorage.decryptString(enc);
+            const data = dec.startsWith('b64:')
+              ? dec.slice(4)
+              : Buffer.from(dec, 'utf8').toString('base64');
+            result = { ok: true, data };
+          } else {
+            result = { ok: true, data: enc.toString('base64') };
+          }
         } catch {
           result = { ok: false };
         }
@@ -293,7 +298,14 @@ async function handleSidecarMessage(msg) {
         }
 
         try {
-          if (updatePath.endsWith('.AppImage')) {
+          if (process.platform === 'win32' && updatePath.toLowerCase().endsWith('.exe')) {
+            cp.spawn(updatePath, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOCANCEL'], {
+              detached: true,
+              stdio: 'ignore',
+            }).unref();
+            setTimeout(() => app.exit(0), 500);
+            result = { ok: true };
+          } else if (updatePath.endsWith('.AppImage')) {
             fs.chmodSync(updatePath, 0o755);
             if (process.env.APPIMAGE) {
               fs.copyFileSync(updatePath, process.env.APPIMAGE);
@@ -421,10 +433,12 @@ ipcMain.on('webview-message', async (_event, msg) => {
       const projectPath = (params && params.projectPath) || '';
       const candidates = [];
       if (process.env.LOCALAPPDATA) {
+        candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'Wide IDE', 'wide.exe'));
         candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'Wide', 'wide.exe'));
         candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'wide-ide', 'wide-ide.exe'));
       }
       if (process.env.PROGRAMFILES) {
+        candidates.push(path.join(process.env.PROGRAMFILES, 'Wide IDE', 'wide.exe'));
         candidates.push(path.join(process.env.PROGRAMFILES, 'Wide', 'wide.exe'));
       }
       candidates.push(path.resolve(ROOT, '..', 'wide', 'dist', 'wide', 'wide.exe'));
@@ -464,8 +478,15 @@ ipcMain.on('webview-message', async (_event, msg) => {
     if (cmd === 'minimize') {
       mainWindow.minimize();
     } else if (cmd === 'maximize') {
-      if (mainWindow.isMaximized()) mainWindow.unmaximize();
-      else mainWindow.maximize();
+      if (mainWindow.isFullScreen()) {
+        mainWindow.setFullScreen(false);
+      } else if (mainWindow.isMaximized()) {
+        mainWindow.unmaximize();
+      } else {
+        mainWindow.maximize();
+      }
+    } else if (cmd === 'fullscreen') {
+      mainWindow.setFullScreen(!mainWindow.isFullScreen());
     } else if (cmd === 'close') {
       mainWindow.close();
     } else if (cmd === 'browser-place') {
@@ -521,10 +542,23 @@ app.whenReady().then(() => {
     icon: path.join(ROOT, 'assets', 'wide-logo.png'),
   });
 
+  const emitWinState = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    emitToRenderer('host:windowState', {
+      maximized: mainWindow.isMaximized(),
+      fullscreen: mainWindow.isFullScreen(),
+    });
+  };
+  mainWindow.on('maximize', emitWinState);
+  mainWindow.on('unmaximize', emitWinState);
+  mainWindow.on('enter-full-screen', emitWinState);
+  mainWindow.on('leave-full-screen', emitWinState);
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.maximize();
     mainWindow.show();
     closeSplash();
+    emitWinState();
   });
 
   const rendererOut = path.join(ROOT, 'out', 'renderer', 'index.html');
