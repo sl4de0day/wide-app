@@ -48,8 +48,12 @@ export function TitleBar() {
   const projectLabel = workflowName || rootName;
   const activeTab = useEditor((state) => state.tabs.find((tab) => tab.path === state.activePath));
   const activeAiChatId = activeTab?.kind === "ai-chat" ? activeTab.path.slice(AI_CHAT_PATH.length) : null;
-  const activeAiChat = useAi((state) => (activeAiChatId ? state.chats[activeAiChatId] : null));
-  const hasActiveChat = Boolean(activeTab?.kind === "ai-chat" && activeAiChatId);
+  const currentChatId =
+    activeAiChatId ||
+    useEditor.getState().tabs.find((tab) => tab.kind === "ai-chat")?.path.slice(AI_CHAT_PATH.length) ||
+    null;
+  const currentChat = useAi((state) => (currentChatId ? state.chats[currentChatId] : null));
+  const canOpenIde = Boolean(currentChatId || rootName);
 
   const hasCodeberg = useExtensions((state) => state.installed.has("codeberg"));
   const branch = useCodeberg((state) =>
@@ -94,28 +98,34 @@ export function TitleBar() {
 
       <div className="flex-1" />
 
-      {hasActiveChat && (
+      {canOpenIde && (
         <button
           type="button"
-          title={t("Open project in Wide IDE")}
+          title={t("Open in Wide IDE")}
           onClick={async () => {
-            const currentRoot = useWorkspace.getState().root || activeAiChat?.root || "";
-            if (activeAiChatId) {
+            const currentRoot = useWorkspace.getState().root || currentChat?.root || "";
+            const currentTitle = activeTab?.name || currentChat?.title || t("New conversation");
+            if (currentChatId) {
+              if (currentChat?.history?.length) {
+                await bridge.aiSaveSession(currentChatId, currentRoot, currentChat.history);
+              }
               await bridge.aiActiveChat({
-                id: activeAiChatId,
+                id: currentChatId,
                 root: currentRoot,
-                title: activeTab?.name || "New conversation",
+                title: currentTitle,
               });
             }
-            const res = await bridge.launchIde({ projectPath: currentRoot });
+            const res = await bridge.launchIde({
+              projectPath: currentRoot,
+              chatId: currentChatId || undefined,
+            });
             if (res && res.ok) {
               toast.success(t("Wide IDE opened"));
             } else {
               toast.error(res?.error || t("Failed to open Wide IDE"));
             }
           }}
-          style={{ display: "none" }}
-          className="hidden no-drag mr-2 flex h-6.5 shrink-0 items-center gap-1.5 rounded-md bg-accent/20 px-2.5 text-[12px] font-medium text-fg-bright transition-colors hover:bg-accent/35"
+          className="no-drag mr-2 flex h-6.5 shrink-0 items-center gap-1.5 rounded-md bg-accent/20 px-2.5 text-[12px] font-medium text-fg-bright transition-colors hover:bg-accent/35"
         >
           <ExternalLink className="size-3.5" strokeWidth={1.75} />
           <span>Open IDE</span>

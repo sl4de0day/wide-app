@@ -662,7 +662,7 @@ export type AiEvent =
 
 export interface AiSessionMeta {
   id: string;
-
+  root?: string;
   title: string;
   createdAt: number;
   updatedAt: number;
@@ -1294,6 +1294,7 @@ export interface HostApi {
   aiNewSession(root: string): Promise<Ok<{ session?: AiSession }>>;
   aiSaveSession(id: string, root: string, messages: AiMessage[]): Promise<Ok<{ session?: AiSessionMeta }>>;
   aiActiveChat(payload?: { id: string; root: string; title: string }): Promise<Ok<{ activeChat?: { id: string; root: string; title: string; timestamp: number } | null }>>;
+  launchIde(payload: { projectPath: string; chatId?: string }): Promise<Ok<{ launched?: boolean; path?: string }>>;
   aiDeleteSession(id: string): Promise<Ok>;
   aiSend(request: {
     id: string;
@@ -1689,6 +1690,7 @@ const fallback = {
   aiNewSession: async () => (warn(), { ok: false, error: "No bridge" }),
   aiSaveSession: async () => (warn(), { ok: false, error: "No bridge" }),
   aiActiveChat: async () => (warn(), { ok: false, error: "No bridge" }),
+  launchIde: async () => (warn(), { ok: false, error: "No bridge" }),
   aiDeleteSession: async () => (warn(), { ok: false, error: "No bridge" }),
   aiSend: async () => (warn(), { ok: false, error: "No bridge" }),
   aiComplete: async () => (warn(), { ok: false, error: "No bridge" }),

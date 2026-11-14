@@ -343,13 +343,76 @@ function registerAiStoreHandlers() {
     }
   });
 
-  electron.ipcMain.handle("ide:launch", async (_event, params) => {
+  const handleIdeLaunch = async (_event, params) => {
     const projectPath = params?.projectPath ? String(params.projectPath) : "";
+    let chatId = params?.chatId ? String(params.chatId) : "";
+    if (!chatId) {
+      try {
+        const activeData = JSON.parse(await promises.readFile(AI_ACTIVE_CHAT_FILE(), "utf8"));
+        if (activeData?.id) chatId = String(activeData.id);
+      } catch {}
+    }
+
+    if (chatId) {
+      const record = await readAiSession(chatId);
+      if (record) {
+        const safe = chatId.replace(/[^a-zA-Z0-9_-]/g, "");
+        const appDataBase = process.env.APPDATA || (process.platform === "win32" ? node_path.join(node_os.homedir(), "AppData", "Roaming") : (process.env.XDG_CONFIG_HOME || node_path.join(node_os.homedir(), ".config")));
+        const activeRecord = {
+          id: String(chatId),
+          root: String(projectPath || record.root || ""),
+          title: String(record.title || ""),
+          timestamp: Date.now(),
+        };
+        const activeJson = JSON.stringify(activeRecord, null, 2);
+        const sessionJson = JSON.stringify(record, null, 2);
+
+        const targetDirs = [
+          node_path.join(appDataBase, "wide"),
+          node_path.join(appDataBase, "Wide"),
+          node_path.join(appDataBase, "Wide IDE"),
+        ];
+
+        if (projectPath) {
+          targetDirs.push(node_path.join(projectPath, ".wide"));
+        }
+
+        for (const dir of targetDirs) {
+          try {
+            await promises.mkdir(dir, { recursive: true });
+            const sDir = node_path.join(dir, "ai-sessions");
+            await promises.mkdir(sDir, { recursive: true });
+            await writeFileAtomic(node_path.join(sDir, `${safe}.json`), sessionJson, "utf8");
+            await writeFileAtomic(node_path.join(dir, "active-chat.json"), activeJson, "utf8");
+          } catch {}
+        }
+      }
+    }
+
     const candidates = [
+      process.env.WIDE_IDE_PATH,
+      process.env.WIDE_PATH,
+      node_path.join(process.env.LOCALAPPDATA || "", "Programs", "Wide IDE", "wide.exe"),
       node_path.join(process.env.LOCALAPPDATA || "", "Programs", "Wide", "wide.exe"),
-      node_path.resolve(__dirname, "..", "..", "..", "wide", "native-host", "build", "bin", "Release", "wide.exe"),
+      node_path.join(process.env.PROGRAMFILES || "", "Wide IDE", "wide.exe"),
+      node_path.join(process.env.PROGRAMFILES || "", "Wide", "wide.exe"),
+      node_path.join(process.env["PROGRAMFILES(X86)"] || "", "Wide IDE", "wide.exe"),
+      node_path.join(process.env["PROGRAMFILES(X86)"] || "", "Wide", "wide.exe"),
       node_path.resolve(__dirname, "..", "..", "..", "wide", "dist", "wide", "wide.exe"),
-    ];
+      node_path.resolve(__dirname, "..", "..", "..", "wide", "native-host", "target", "release", "wide.exe"),
+      node_path.resolve(__dirname, "..", "..", "..", "wide", "native-host", "target", "debug", "wide.exe"),
+      node_path.resolve(process.cwd(), "..", "wide", "dist", "wide", "wide.exe"),
+      node_path.resolve(process.cwd(), "..", "wide", "native-host", "target", "release", "wide.exe"),
+      node_path.resolve(process.cwd(), "..", "wide", "native-host", "target", "debug", "wide.exe"),
+      "/usr/bin/wide",
+      "/usr/local/bin/wide",
+      node_path.join(process.env.HOME || "", ".local", "bin", "wide"),
+      "/opt/wide/wide",
+      "/opt/wide-ide/wide",
+      node_path.resolve(__dirname, "..", "..", "..", "wide", "native-host", "target", "release", "wide"),
+      node_path.resolve(process.cwd(), "..", "wide", "native-host", "target", "release", "wide"),
+    ].filter(Boolean);
+
     let targetExe = null;
     for (const candidate of candidates) {
       try {
@@ -358,9 +421,25 @@ function registerAiStoreHandlers() {
         break;
       } catch {}
     }
+
+    if (!targetExe) {
+      try {
+        const lookupCmd = process.platform === "win32" ? "where.exe" : "which";
+        const found = node_child_process.execFileSync(lookupCmd, ["wide"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim().split(/\r?\n/)[0];
+        if (found) {
+          await promises.access(found);
+          targetExe = found;
+        }
+      } catch {}
+    }
+
     if (!targetExe) {
       return { ok: false, error: "Wide IDE executable was not found on this system." };
     }
+
     try {
       const args = projectPath ? [projectPath] : [];
       const child = node_child_process.spawn(targetExe, args, {
@@ -369,9 +448,12 @@ function registerAiStoreHandlers() {
         windowsHide: false,
       });
       child.unref();
-      return { ok: true, path: targetExe };
+      return { ok: true, path: targetExe, launched: true };
     } catch (err) {
       return { ok: false, error: err.message };
     }
-  });
+  };
+
+  electron.ipcMain.handle("ide:launch", handleIdeLaunch);
+  electron.ipcMain.handle("app:launchIde", handleIdeLaunch);
 }
