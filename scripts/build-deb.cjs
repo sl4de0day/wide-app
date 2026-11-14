@@ -78,7 +78,7 @@ Architecture: amd64
 Installed-Size: ${installedSizeKb}
 Maintainer: sl4de <sl4de0day@github>
 Homepage: https://github.com/sl4de0day/wide-app
-Depends: libgtk-3-0, libnss3, libasound2, libnotify4, libsecret-1-0, libxss1, libxtst6
+Depends: libwebkit2gtk-4.1-0 | libwebkit2gtk-4.0-37, libgtk-3-0, libsoup-3.0-0 | libsoup2.4-1, libasound2, libnotify4, libsecret-1-0
 Description: Autonomous AI workspace and mission control for Wide
  Wide App is the standalone AI chat and autonomous workspace client
  designed for the Wide developer ecosystem.

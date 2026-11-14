@@ -73,12 +73,11 @@ license = GPL-3.0-or-later
 conflict = wide-app
 provides = wide-app
 depend = gtk3
-depend = nss
+depend = webkit2gtk-4.1
+depend = libsoup3
 depend = alsa-lib
 depend = libnotify
 depend = libsecret
-depend = libxss
-depend = libxtst
 `;
 
 fs.writeFileSync(path.join(STAGE, '.PKGINFO'), pkginfoContent.replace(/\r\n/g, '\n'), 'utf8');
