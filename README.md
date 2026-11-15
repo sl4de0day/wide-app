@@ -21,17 +21,20 @@
 **Wide App is a desktop-first autonomous AI workspace and chat companion that brings intelligent pair programming, code refactoring, and security auditing into a focused, distraction-free environment. Bound directly to your local project folders, it executes commands, inspects code, and performs multi-step engineering workflows with zero IDE clutter.**
 
 Wide App is a high-performance cross-platform application designed for speed and minimal resource usage:
-- **Windows:** Native Windows desktop shell running on Chromium runtime with hardware-accelerated rendering and automatic updates.
+- **Windows:** Native Rust desktop host driving hardware-accelerated rendering with automated background updates.
 - **Linux:** Lightweight Wayland/X11 host running on dedicated Chromium runtime with multi-distro packaging.
 - **Core Engine:** High-speed React renderer paired with multi-threaded Node.js backend sidecar and OpenCode integration.
 
 ## Features
 
 - **Autonomous Agent.** A prompt-driven engineering loop with native tool execution (`read_file`, `write_file`, `edit_file`, `list_dir`, `run_command`, `web_search`) directly targeting your local workspace.
+- **Autonomous CDP Browser Drawer.** Built-in Playwright/CDP browser automation with live screencast frames, element highlighting overlays, HAR 1.2 traffic export with header redaction, stealth evasion mode, and 16 agent browser tools.
+- **Integrated Database Subsystem.** Multi-engine database manager for SQLite, PostgreSQL, MySQL, and Redis with execution timing, persistent query history, CSV/JSON/SQL export, and Mermaid ERD visualization.
 - **Project Isolation.** Every conversation binds to an explicit project directory, ensuring AI operations strictly stay within designated project boundaries.
 - **AI Integration.** Pluggable multi-provider architecture supporting local offline inference via Ollama or OpenCode CLI, alongside cloud providers (Gemini, Claude, DeepSeek, OpenAI).
 - **Session Management.** Complete conversation history with fast search, message pinning, grouped timestamp categorization, and instant workspace switching.
-- **Desktop Experience.** Seamless ASCII logo splash animation on startup, maximized window management, and native dark/light theme adaptation.
+- **Cross-App Chat Synchronization.** Shares conversation state with Wide IDE (`active-chat.json`) and enables instant transition via the title bar.
+- **Desktop Experience.** Native Rust host on Windows with Win32 JobObject process isolation, maximized window management, and native dark/light theme adaptation.
 
 ## Installation
 
@@ -66,12 +69,13 @@ Wide App on Linux features native Wayland support, high DPI scaling, and desktop
 Requirements:
 - Windows (x64)
 - Node.js 18 or newer
-- npm
+- Rust toolchain (cargo and rustc)
+- Inno Setup 6 (to produce the installer)
 
 ```bash
 npm install
-npm run build:linux
-node scripts/package-win.cjs
+npm run build
+npm run package:win
 ```
 
 ### Linux
