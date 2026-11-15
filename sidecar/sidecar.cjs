@@ -37,8 +37,14 @@ function send(obj) {
     line = JSON.stringify(obj, (_k, v) => (typeof v === 'bigint' ? String(v) : v));
   } catch (e) {
 
-    if (obj && obj.t === 'reply' && obj.id != null) {
-      try { realStdout.write(JSON.stringify({ t: 'reply', id: obj.id, error: 'Result could not be serialized: ' + String(e && e.message ? e.message : e) }) + '\n'); } catch {}
+    if (obj && obj.type === 'reply' && obj.replyId != null) {
+      try {
+        realStdout.write(JSON.stringify({
+          type: 'reply',
+          replyId: obj.replyId,
+          error: 'Result could not be serialized: ' + String(e && e.message ? e.message : e),
+        }) + '\n');
+      } catch {}
     }
     return;
   }
@@ -50,15 +56,30 @@ const os = require('node:os');
 const IPC_LOG = process.env.GRIDE_LOG_IPC
   ? path.join(os.tmpdir(), 'hc_sidecar_ipc.log') : null;
 const IPC_T0 = Date.now();
+let ipcLogStream = null;
+function safePreview(value, maxLen) {
+  try {
+    const raw = JSON.stringify(value);
+    return typeof raw === 'string' ? raw.slice(0, maxLen) : String(value).slice(0, maxLen);
+  } catch {
+    return '[unserializable]';
+  }
+}
 function logIpc(channel, args, result, err) {
   if (!IPC_LOG) return;
   let out;
   if (err) out = 'ERR ' + String((err && err.message) || err);
   else if (Array.isArray(result)) out = 'len=' + result.length;
-  else out = 'obj ' + JSON.stringify(result).slice(0, 80);
-  const a0 = args && args.length ? JSON.stringify(args[0]).slice(0, 90) : '';
+  else out = 'obj ' + safePreview(result, 80);
+  const a0 = args && args.length ? safePreview(args[0], 90) : '';
   const t = ('     ' + (Date.now() - IPC_T0)).slice(-6);
-  try { fs.appendFileSync(IPC_LOG, t + 'ms ' + channel + ' | ' + a0 + ' -> ' + out + '\n'); } catch {}
+  try {
+    if (!ipcLogStream) {
+      ipcLogStream = fs.createWriteStream(IPC_LOG, { flags: 'a' });
+      ipcLogStream.on('error', () => {});
+    }
+    ipcLogStream.write(t + 'ms ' + channel + ' | ' + a0 + ' -> ' + out + '\n');
+  } catch {}
 }
 
 const hostPending = new Map();
@@ -111,27 +132,35 @@ function dispatchInvoke(msg) {
   ready.then(() => {
     const ch = msg.channel;
     if (ROOT_SOURCES.has(ch)) {
-      const pending = runInvoke(msg);
-      rootGate = pending.then(
-        function () { rootGate = null; },
-        function () { rootGate = null; },
+      const prev = rootGate || Promise.resolve();
+      const gate = prev.then(() => runInvoke(msg)).then(
+        () => { if (rootGate === gate) rootGate = null; },
+        () => { if (rootGate === gate) rootGate = null; },
       );
+      rootGate = gate;
       return;
     }
 
     if (rootGate && NEEDS_ROOT.test(ch)) {
-      rootGate.then(function () { runInvoke(msg).catch(function () {}); });
+      rootGate.then(() => runInvoke(msg).catch(() => {}));
       return;
     }
-    runInvoke(msg).catch(function () {});
+    runInvoke(msg).catch(() => {});
+  }).catch((err) => {
+    send({ type: 'reply', replyId: msg.id, error: String((err && err.message) || err) });
   });
 }
 
 const rl = readline.createInterface({ input: process.stdin });
 
 rl.on('close', () => {
-  try { mock.app.quit(); } catch {}
-  process.exit(0);
+  if (ipcLogStream) { try { ipcLogStream.end(); } catch {} }
+  const done = typeof mock.__shutdown === 'function'
+    ? Promise.resolve(mock.__shutdown())
+    : Promise.resolve().then(() => mock.app.quit());
+  const forceExit = setTimeout(() => process.exit(0), 3000);
+  if (typeof forceExit.unref === 'function') forceExit.unref();
+  done.catch(() => {}).finally(() => process.exit(0));
 });
 
 rl.on('line', (line) => {

@@ -22,6 +22,8 @@ interface ToastState {
 
 let seq = 0;
 
+const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
 export const useToast = create<ToastState>((set) => ({
   toasts: [],
   history: [],
@@ -33,11 +35,22 @@ export const useToast = create<ToastState>((set) => ({
       history: [item, ...s.history].slice(0, 50),
     }));
     if (ttlMs > 0) {
-      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), ttlMs);
+      const timer = setTimeout(() => {
+        toastTimers.delete(id);
+        set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+      }, ttlMs);
+      toastTimers.set(id, timer);
     }
     return id;
   },
-  dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  dismiss: (id) => {
+    const timer = toastTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      toastTimers.delete(id);
+    }
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+  },
   clearHistory: () => set({ history: [] }),
 }));
 

@@ -538,7 +538,8 @@ function aiAllowed(channel, args) {
   return { ok: true };
 }
 
-function aiRunShell(root, command) {
+function aiRunShell(root, command, signal = null) {
+  if (signal?.aborted) return Promise.resolve("Command aborted because AI turn stopped.");
   return new Promise((resolve) => {
     let out = "";
     let done = false;
@@ -556,13 +557,19 @@ function aiRunShell(root, command) {
       return;
     }
     const interactivePromptRe = /(?:password|passphrase|pin|confirm|continue|overwrite|enter\s+value)\s*[:?]\s*$|(?:\[\s*[yY]\s*\/\s*[nN]\s*\]|\[\s*yes\s*\/\s*no\s*\])\s*$|>>>\s*$|Press any key/i;
+    const onAbort = () => {
+      try { killProcessTree(child); } catch {}
+      finish(aiTrim(`exit 130 (aborted)\n${out}\nCommand aborted because AI turn stopped.`));
+    };
     const finish = (text) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       clearInterval(idleCheck);
+      if (signal) signal.removeEventListener("abort", onAbort);
       resolve(text);
     };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
     const capture = (data) => {
       lastOutputAt = Date.now();
       out += data.toString("utf8");
@@ -581,7 +588,7 @@ function aiRunShell(root, command) {
       if (done) return;
       const idleMs = Date.now() - lastOutputAt;
       const tail = out.slice(-300);
-      if ((interactivePromptRe.test(tail) && idleMs >= 3000) || idleMs >= 10000) {
+      if ((interactivePromptRe.test(tail) && idleMs >= 4000) || idleMs >= 45000) {
         try {
           killProcessTree(child);
         } catch {
@@ -589,11 +596,12 @@ function aiRunShell(root, command) {
         }
         finish(
           aiTrim(
-            `exit 124 (idle timeout after ${Math.round(idleMs / 1000)}s)\n${out}\n[Command paused waiting for interactive input or produced no output for 10s. Pass non-interactive flags such as -y/--yes/CI=1, avoid interactive prompts, or use terminal_session for background servers.]`,
+            `exit 124 (idle timeout after ${Math.round(idleMs / 1000)}s)\n${out}\n[Command paused waiting for interactive input or produced no output. Pass non-interactive flags such as -y/--yes/CI=1, avoid interactive prompts, or use terminal_session for background servers.]`,
           ),
         );
       }
     }, 1000);
+    idleCheck.unref?.();
     const timer = setTimeout(() => {
       if (done) return;
       try {
@@ -601,8 +609,9 @@ function aiRunShell(root, command) {
       } catch {
         void 0;
       }
-      out += "\n… the command ran longer than 60 seconds and was stopped.";
+      finish(aiTrim(`exit 124 (timeout after 60s)\n${out}\nThe command ran longer than 60 seconds and was stopped.`));
     }, 60000);
+    timer.unref?.();
     child.on("error", (error) => {
       finish(`The command could not start: ${String((error && error.message) || error)}`);
     });
@@ -612,7 +621,8 @@ function aiRunShell(root, command) {
   });
 }
 
-function aiRunGit(root, args) {
+function aiRunGit(root, args, signal = null) {
+  if (signal?.aborted) return Promise.resolve("Git command aborted because AI turn stopped.");
   return new Promise((resolve) => {
     let out = "";
     let done = false;
@@ -623,6 +633,18 @@ function aiRunGit(root, args) {
       resolve(`git could not run: ${String((error && error.message) || error)}. Is git installed?`);
       return;
     }
+    const onAbort = () => {
+      try { killProcessTree(child); } catch {}
+      finish(aiTrim(`git ${args.join(" ")} (aborted)\n${out}`));
+    };
+    const finish = (text) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve(text);
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
     const capture = (data) => {
       out += data.toString("utf8");
       if (out.length > AI_MAX_TOOL_RESULT_BYTES) {
@@ -643,18 +665,14 @@ function aiRunGit(root, args) {
       } catch {
         void 0;
       }
+      finish(aiTrim(`git ${args.join(" ")} (timeout after 30s)\n${out}`));
     }, 30000);
+    timer.unref?.();
     child.on("error", (error) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      resolve(`git could not run: ${String((error && error.message) || error)}. Is git installed?`);
+      finish(`git could not run: ${String((error && error.message) || error)}. Is git installed?`);
     });
     child.on("close", (code) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      resolve(aiTrim(`git ${args.join(" ")} (exit ${code})\n${out || "(no output)"}`));
+      finish(aiTrim(`git ${args.join(" ")} (exit ${code})\n${out || "(no output)"}`));
     });
   });
 }
@@ -1036,9 +1054,10 @@ function aiNormalizeHttpRequestHeaders(raw) {
   return [];
 }
 
-async function aiExecuteHttpRequest(url, method = "GET", headers = {}, body = null, insecure = true) {
+async function aiExecuteHttpRequest(url, method = "GET", headers = {}, body = null, insecure = true, signal = null) {
   const normUrl = String(url || "").trim();
   if (!normUrl) return "Missing required argument: 'url'.";
+  if (signal?.aborted) return "Turn was stopped.";
 
   const normMethod = String(method || "GET").trim().toUpperCase();
   const safeHeaders = aiNormalizeHttpRequestHeaders(headers);
@@ -1053,6 +1072,7 @@ async function aiExecuteHttpRequest(url, method = "GET", headers = {}, body = nu
     const res = await sendOnce(normUrl, normMethod, safeHeaders, normBody, HTTP_MAX_REDIRECTS, {
       insecure: insecure !== false,
       ...(proxyOpts ? { proxy: proxyOpts } : {}),
+      ...(signal ? { signal } : {}),
     });
 
     if (!res.ok) {
@@ -1157,12 +1177,12 @@ const AI_EMBEDDED_AGENT_RULES = [
   { id: "wide/ai-language-matching", name: "ai-language-matching", category: "AI_SECURITY", severity: "MEDIUM", languages: ["all"], pattern: "^[\\u200D]$", message: "Respond concisely in the user's language, referencing only observed files and verified tool results.", instruction: "Always respond in the user's language unless instructed otherwise, keeping technical summaries concise and grounded strictly in observed files and tool results." },
   { id: "wide/cwe078-ai-unsafe-tool-exec", cwe: "CWE-78", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:exec|execSync|spawn|subprocess\\.run|os\\.system)\\s*\\(\\s*(?:toolCall|tool_call|args|arguments|response\\.command|patch\\.command)", message: "Executing raw system command directly from AI tool call response without argument validation.", remediation: "Whitelist allowed commands and run them in an isolated sandbox with fixed arguments.", instruction: "Never execute raw system commands directly from AI tool call responses without argument validation." },
   { id: "wide/cwe079-ai-prompt-injection", cwe: "CWE-79", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:prompt|instruction|query|input)\\s*[:=]\\s*(?:f?[\"'].*?\\{|`.*?\\$\\{).*(?:req\\.|params\\.|body\\.|userInput|user_input|request\\.)", message: "Untrusted user input concatenated directly into LLM prompt template without sanitization.", instruction: "Always validate and sanitize untrusted user input before incorporating into prompt templates." },
-  { id: "wide/cwe095-ai-unconstrained-eval", cwe: "CWE-95", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:eval|Function|vm\\.runInContext|compile)\\s*\\(\\s*(?:toolOutput|tool_output|response\\.text|aiResult|ai_output|completion)", message: "Evaluating raw executable code returned by LLM without sandboxing or static verification.", instruction: "Never evaluate raw executable code dynamically without AST schema validation or sandboxing." },
-  { id: "wide/cwe306-ai-unauthenticated-mcp-registration", cwe: "CWE-306", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:registerMcpServer|addMcpServer|mcpClient\\.connect)\\s*\\(\\s*(?:url|endpoint|serverConfig)\\s*\\)", message: "Model Context Protocol server registered without identity verification or authorization signature.", instruction: "Never register external toolsets or MCP servers without authentication and user authorization." },
-  { id: "wide/cwe400-ai-unbounded-agent-loop", cwe: "CWE-400", category: "AI_SECURITY", severity: "MEDIUM", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "while\\s*\\(\\s*(?:true|1|!done|!finished|!settled)\\s*\\)\\s*\\{(?![^}]*\\b(?:maxRounds|maxSteps|maxIterations|round\\s*>=|step\\s*>=)\\b)", message: "Autonomous agent execution loop lacks explicit termination boundary or maximum step limit.", instruction: "Always respect maximum step thresholds and loop termination boundaries." },
-  { id: "wide/cwe770-ai-unbounded-context-accumulation", cwe: "CWE-770", category: "AI_SECURITY", severity: "MEDIUM", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:history|messages|chatContext)\\.push\\s*\\(.*\\)(?![^;]*(?:slice|shift|trim|truncate|maxTokens|maxHistory))", message: "LLM conversation context accumulates without token limits or sliding window truncation.", instruction: "Maintain concise conversation context and avoid unbounded accumulation." },
-  { id: "wide/cwe798-ai-prompt-secret-leak", cwe: "CWE-798", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:systemPrompt|systemMessage|system_prompt)\\s*[:=].*?(?:process\\.env\\.(?:[A-Z_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH))|apiKey|api_key|secret)", message: "Sensitive secrets or private API credentials embedded in prompt context.", instruction: "Never include secrets, API keys, private tokens, or credentials in prompt context or output." },
-  { id: "wide/cwe829-ai-unvalidated-patch-apply", cwe: "CWE-829", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:applyPatch|gitApply|applyDiff|writePatch)\\s*\\(\\s*(?:aiPatch|llmResponse|output\\.patch|modelDiff)", message: "Applying LLM-generated patch directly to codebase without path traversal or integrity checks.", instruction: "Always inspect relevant files before modifying them, validate bounds, and verify patch integrity." }
+  { id: "wide/cwe095-ai-unconstrained-eval", cwe: "CWE-95", category: "AI_SECURITY", severity: "CRITICAL", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:eval|Function|vm\\.runInContext|compile)\\s*\\(\\s*(?:(?:model|ai|agent|llm)Response|suggestedCode|candidatePatch|toolArgs|toolOutput|tool_output|response\\.text|aiResult|ai_output|completion)\\b", message: "Evaluating raw executable code returned by LLM without sandboxing or static verification.", instruction: "Never evaluate raw executable code dynamically without AST schema validation or sandboxing." },
+  { id: "wide/cwe306-ai-unauthenticated-mcp-registration", cwe: "CWE-306", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:(?:mcp|toolRegistry)\\.(?:register|addServer|connect)\\s*\\(\\s*(?:req\\.|params\\.|untrusted|remoteUrl|url|endpoint|serverConfig)|(?:registerMcpServer|addMcpServer|mcpClient\\.connect)\\s*\\(\\s*(?:url|endpoint|serverConfig|req\\.|params\\.|untrusted|remoteUrl))", message: "Model Context Protocol server registered without identity verification or authorization signature.", instruction: "Never register external toolsets or MCP servers without authentication and user authorization." },
+  { id: "wide/cwe400-ai-unbounded-agent-loop", cwe: "CWE-400", category: "AI_SECURITY", severity: "MEDIUM", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\bwhile\\s*\\(\\s*(?:true|1|!done|!finished|!settled)\\s*\\)\\s*\\{(?![^}]*\\b(?:maxRounds|maxSteps|maxIterations|round\\s*>=|step\\s*>=)\\b)[^}]*(?:agent|runner|llm)\\.(?:step|run|complete|executeTurn)\\s*\\(", message: "Autonomous agent execution loop lacks explicit termination boundary or maximum step limit.", instruction: "Always respect maximum step thresholds and loop termination boundaries." },
+  { id: "wide/cwe770-ai-unbounded-context-accumulation", cwe: "CWE-770", category: "AI_SECURITY", severity: "LOW", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:messages|history|conversation|chatContext)\\s*\\.push\\s*\\([^)]*\\)(?![^\\n]*(?:slice|shift|trim|truncate|maxTokens|maxHistory))", message: "LLM conversation context accumulates without token limits or sliding window truncation.", instruction: "Maintain concise conversation context and avoid unbounded accumulation." },
+  { id: "wide/cwe798-ai-prompt-secret-leak", cwe: "CWE-798", category: "AI_SECURITY", severity: "HIGH", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:systemPrompt|systemMessage|system_prompt|instructions)\\s*[:=].*?(?:process\\.env\\.(?:[A-Z_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASS|AUTH))|apiKey|api_key|password|secret|auth_token|token)\\b", message: "Sensitive secrets or private API credentials embedded in prompt context.", instruction: "Never include secrets, API keys, private tokens, or credentials in prompt context or output." },
+  { id: "wide/cwe829-ai-unvalidated-patch-apply", cwe: "CWE-829", category: "AI_SECURITY", severity: "MEDIUM", languages: ["js", "jsx", "ts", "tsx", "py", "mjs", "cjs"], pattern: "\\b(?:applyPatch|gitApply|applyDiff|writePatch|fs\\.writeFile|writeFileSync)\\s*\\(\\s*(?:filepath|path|file)\\s*,\\s*(?:patch|suggestion|aiOutput|aiPatch|llmResponse|response\\.content|output\\.patch|modelDiff)\\s*\\)|\\b(?:applyPatch|gitApply|applyDiff|writePatch)\\s*\\(\\s*(?:aiPatch|llmResponse|output\\.patch|modelDiff)", message: "Applying LLM-generated patch directly to codebase without path traversal or integrity checks.", instruction: "Always inspect relevant files before modifying them, validate bounds, and verify patch integrity." }
 ];
 
 const AI_EMOJI_ZWJ_RE = /(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u2600-\u27BF])(?:\uFE0F|\uFE0E|[\u{1F3FB}-\u{1F3FF}])?(?:\u200D(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u2600-\u27BF])(?:\uFE0F|\uFE0E|[\u{1F3FB}-\u{1F3FF}])?)+/gu;
@@ -1404,7 +1424,8 @@ function aiExecuteGetOpenTabs(root) {
   return `Currently open tabs in Wide editor (${aiLastKnownOpenTabs.length} tab${aiLastKnownOpenTabs.length > 1 ? "s" : ""}):\n${formatted.join("\n")}`;
 }
 
-async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt = "") {
+async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt = "", signal = null) {
+  if (signal?.aborted) return "Turn was stopped.";
   try {
     const normalized = aiNormalizeToolCall(rawName, rawInput);
     const name = normalized.name;
@@ -1601,12 +1622,13 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
           detail: risk.reason,
           command,
           tool: "run_command",
+          signal,
         });
         if (!decision.allowed) {
           return `Command cancelled: ${decision.reason || "user declined destructive command."}`;
         }
       }
-      return await aiRunShell(root, command);
+      return await aiRunShell(root, command, signal);
     }
 
     if (name === "git") {
@@ -1624,7 +1646,7 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       if (mutating && !allowWrites) return "Git writes (add/commit) are turned off. The person can turn on AI writes in the AI settings.";
       const allowed = aiAllowed(mutating ? "ai:tool.write" : "ai:tool.search", [root]);
       if (!allowed.ok) return allowed.reason;
-      return await aiRunGit(root, args);
+      return await aiRunGit(root, args, signal);
     }
 
     if (name === "transform_data") {
@@ -1646,7 +1668,7 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
     }
 
     if (name === "send_http_request" || name === "pitcher_send") {
-      return await aiExecutePitcherSend(root, input, send);
+      return await aiExecutePitcherSend(root, input, send, signal);
     }
 
     if (name === "pitcher_env") {
@@ -1841,6 +1863,10 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
 
     if (name === "browser_screenshot") {
       return await aiExecuteBrowserScreenshot(send, input);
+    }
+
+    if (name === "browser_export_har") {
+      return await aiExecuteBrowserExportHar(input, send);
     }
 
     if (name === "browser_close") {
@@ -2163,10 +2189,12 @@ function registerAiAgentHandlers() {
     const promptOpts = { language, activeFile, openTabs, includeXmlToolCatalog: false, agentRulesObj };
     const prompt = await aiBuildAgentSystemPrompt(system, root, config.allowWrites, projInstr.content, cleanEffort, promptOpts);
     const promptWithXmlCatalog = provider === "local"
-      ? await aiBuildAgentSystemPrompt(system, root, config.allowWrites, projInstr.content, cleanEffort, { ...promptOpts, includeXmlToolCatalog: true })
+      ? `${prompt}\n\n${aiBuildToolCatalogPrompt(config.allowWrites)}`
       : prompt;
     const turn = aiApplyImages(aiWithAgentDirective(messages), provider);
 
+    const prevController = aiTurns.get(id);
+    if (prevController) prevController.abort();
     const sender = event.sender;
     const controller = new AbortController();
     aiTurns.set(id, controller);
@@ -2280,7 +2308,7 @@ function registerAiAgentHandlers() {
       send({ type: "error", message: String(error.message || error) });
       return { ok: false, error: String(error.message || error) };
     } finally {
-      aiTurns.delete(id);
+      if (aiTurns.get(id) === controller) aiTurns.delete(id);
       send({ type: "done" });
     }
   });
@@ -2443,70 +2471,81 @@ function registerAiAgentHandlers() {
       if (_event?.sender && !_event.sender.isDestroyed()) _event.sender.send("ai:event", ev);
     };
     const act = String(action || "status").toLowerCase();
-    if (act === "open") {
-      const res = await aiExecuteBrowserOpen(params, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
+    try {
+      if (act === "open") {
+        const res = await aiExecuteBrowserOpen(params, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "navigate") {
+        const res = await aiExecuteBrowserNavigate(params.url, emit, params);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "snapshot") {
+        const res = await aiExecuteBrowserSnapshot(params, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "click") {
+        const res = await aiExecuteBrowserClick(params.selector, params.element_id, params.text, emit, params);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "type") {
+        const res = await aiExecuteBrowserType(params.selector, params.element_id, params.text, params.clear, params.submit, emit, params);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "press") {
+        const res = await aiExecuteBrowserPress(params.key, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "hover") {
+        const res = await aiExecuteBrowserHover(params, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "select") {
+        const res = await aiExecuteBrowserSelect(params, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "scroll") {
+        const res = await aiExecuteBrowserScroll(params, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "wait") {
+        const res = await aiExecuteBrowserWait(params, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "console") {
+        const res = await aiExecuteBrowserConsole(params, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "cookies") {
+        const res = await aiExecuteBrowserCookies(params, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "eval") {
+        const res = await aiExecuteBrowserEval(params.expression, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "extract") {
+        const res = await aiExecuteBrowserExtract(params.selector, params.mode, emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "screenshot") {
+        const res = await aiExecuteBrowserScreenshot(emit, params);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "export_har") {
+        const har = aiBrowserBuildHarLog(params);
+        return { ok: true, result: har, entryCount: har.log.entries.length, session: aiBrowserSession };
+      }
+      if (act === "close") {
+        const res = await aiExecuteBrowserClose(emit);
+        return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (act === "status") {
+        return { ok: true, session: aiBrowserSession };
+      }
+      return { ok: false, error: `Unsupported browser action: ${act}`, session: aiBrowserSession };
+    } catch (error) {
+      return { ok: false, error: String(error?.message || error), session: aiBrowserSession };
     }
-    if (act === "navigate") {
-      const res = await aiExecuteBrowserNavigate(params.url, emit, params);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "snapshot") {
-      const res = await aiExecuteBrowserSnapshot(params, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "click") {
-      const res = await aiExecuteBrowserClick(params.selector, params.element_id, params.text, emit, params);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "type") {
-      const res = await aiExecuteBrowserType(params.selector, params.element_id, params.text, params.clear, params.submit, emit, params);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "press") {
-      const res = await aiExecuteBrowserPress(params.key, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "hover") {
-      const res = await aiExecuteBrowserHover(params, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "select") {
-      const res = await aiExecuteBrowserSelect(params, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "scroll") {
-      const res = await aiExecuteBrowserScroll(params, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "wait") {
-      const res = await aiExecuteBrowserWait(params, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "console") {
-      const res = await aiExecuteBrowserConsole(params, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "cookies") {
-      const res = await aiExecuteBrowserCookies(params, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "eval") {
-      const res = await aiExecuteBrowserEval(params.expression, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "extract") {
-      const res = await aiExecuteBrowserExtract(params.selector, params.mode, emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "screenshot") {
-      const res = await aiExecuteBrowserScreenshot(emit, params);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    if (act === "close") {
-      const res = await aiExecuteBrowserClose(emit);
-      return { ok: true, result: res, session: aiBrowserSession };
-    }
-    return { ok: true, session: aiBrowserSession };
   });
 }

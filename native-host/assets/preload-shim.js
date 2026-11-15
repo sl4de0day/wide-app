@@ -14,7 +14,7 @@
   const subscribers = new Map();
 
   function failPending(reason) {
-    const waiting = Array.prototype.slice.call(pending.values());
+    const waiting = Array.from(pending.values());
     pending.clear();
     waiting.forEach(function (p) {
       try { p.reject(new Error(reason)); } catch (e) {}
@@ -274,6 +274,7 @@
     updateInstall: function (info) { return invoke("update:install", info); },
     onUpdateProgress: subscribe("update:progress"),
     installLanguage: function () { return invoke("app:installLanguage"); },
+    getDiagnostics: function () { return invoke("app:getDiagnostics"); },
     loadSettings: function () { return invoke("settings:load"); },
     saveSettings: function (settings) { return invoke("settings:save", settings); },
     loadTabs: function (root) { return invoke("tabs:load", root); },
@@ -408,6 +409,8 @@
     dbAudit: function (id) { return invoke("db:audit", id); },
     dbListSavedQueries: function (root) { return invoke("db:listSavedQueries", root); },
     dbSaveQuery: function (root, name, sql) { return invoke("db:saveQuery", root, name, sql); },
+    dbListHistory: function (connectionId) { return invoke("db:listHistory", connectionId); },
+    dbClearHistory: function (connectionId) { return invoke("db:clearHistory", connectionId); },
     dbRedisCommand: function (id, action, params) { return invoke("db:redisCommand", id, action, params); },
   };
 

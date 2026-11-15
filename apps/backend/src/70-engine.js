@@ -14,7 +14,7 @@ function registerEngineHandlers() {
     try {
       server = await listen(served);
 
-      const watching = startWatching(served, (relative) => pushReload(relative));
+      const watching = perfStartWatching(served, (relative) => pushReload(relative));
       return ok$1({ status: currentStatus(), directory, watching });
     } catch (error) {
       server = null;
@@ -187,6 +187,8 @@ async function runTool({ tool, command, root, active: activeFile, input, emit })
   });
   let readyTimer = null;
   let runTimer = null;
+  let forceKillTimer = null;
+  let settled = false;
   const record2 = {
     kill: () => {
       try {
@@ -198,23 +200,35 @@ async function runTool({ tool, command, root, active: activeFile, input, emit })
   };
   active.set(runId, record2);
   const done = (value) => {
+    if (settled) return;
+    settled = true;
     clearTimeout(readyTimer);
     clearTimeout(runTimer);
+    clearTimeout(forceKillTimer);
     active.delete(runId);
     record2.kill();
     settle(value);
   };
   readyTimer = setTimeout(() => done({ ok: false, error: `${tool.name} did not start.` }), READY_MS);
+  readyTimer.unref?.();
   let said = "";
+  const MAX_SAID = 16384;
   for (const stream of [child.stdout, child.stderr]) {
     stream?.setEncoding("utf8");
     stream?.on("data", (chunk) => {
-      said += chunk;
-      for (const line of String(chunk).split("\n")) {
+      const text = String(chunk);
+      if (said.length < MAX_SAID) said += text.slice(0, MAX_SAID - said.length);
+      for (const line of text.split("\n")) {
         if (line.trim()) emit({ kind: "log", toolId: tool.id, text: line.trimEnd() });
       }
     });
   }
+  child.on("error", (error) => {
+    done({
+      ok: false,
+      error: `${tool.name} failed to start: ${error?.message ?? error}`
+    });
+  });
   child.on(
     "exit",
     (code) => done({
@@ -228,14 +242,16 @@ async function runTool({ tool, command, root, active: activeFile, input, emit })
       clearTimeout(readyTimer);
       runTimer = setTimeout(() => {
         record2.cancel();
-        setTimeout(
+        forceKillTimer = setTimeout(
           () => done({
             ok: false,
             error: `${tool.name} ran for longer than ${RUN_MS / 1e3} seconds and was stopped.`
           }),
           1e3
         );
+        forceKillTimer.unref?.();
       }, RUN_MS);
+      runTimer.unref?.();
       child.postMessage({
         t: protocol.TO_TOOL.RUN,
         runId,

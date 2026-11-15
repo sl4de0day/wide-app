@@ -1951,4 +1951,13 @@ export const KO: Record<string, string> = {
   "Update & Restart": "업데이트 및 다시 시작",
   "Wide App checks for updates on startup and installs them automatically from GitHub.": "Wide App은 시작 시 업데이트를 확인하고 GitHub에서 자동으로 설치합니다.",
   "Wide IDE opened": "Wide IDE가 열렸습니다",
+  "Clear History": "기록 지우기",
+  "Copied Mermaid ERD diagram.": "Mermaid ERD 다이어그램이 복사되었습니다.",
+  "Copy Mermaid": "Mermaid 복사",
+  "Could not copy Mermaid diagram.": "Mermaid 다이어그램을 복사할 수 없습니다.",
+  "A crash was detected from the previous session": "이전 세션에서 충돌이 감지되었습니다",
+  "It appears {app} encountered an unexpected error and closed. You can help improve stability by submitting this anonymous report.": "{app}에서 예기치 않은 오류가 발생하여 종료된 것으로 보입니다. 이 익명 보고서를 제출하여 안정성 향상에 도움을 줄 수 있습니다.",
+  "Type: {kind}": "유형: {kind}",
+  "Sending...": "전송 중...",
+  "Send Report": "보고서 전송",
 };

@@ -4,7 +4,11 @@ const PROXY_DIR = () => node_path.join(electron.app.getPath("userData"), "proxy"
 const PROXY_CA_CERT = () => node_path.join(PROXY_DIR(), "ca-cert.pem");
 const PROXY_CA_KEY = () => node_path.join(PROXY_DIR(), "ca-key.bin");
 
-const forge = require("node-forge");
+let forgeCache = null;
+function getForge() {
+  if (!forgeCache) forgeCache = require("node-forge");
+  return forgeCache;
+}
 
 const PROXY_MAX_BODY = 8 * 1024 * 1024;
 const PROXY_MAX_ENTRIES = 5000;
@@ -346,6 +350,7 @@ async function loadOrMakeCa() {
     const certPem = await promises.readFile(PROXY_CA_CERT(), "utf8");
     const keyBlob = await promises.readFile(PROXY_CA_KEY());
     const keyPem = electron.safeStorage.decryptString(keyBlob);
+    const forge = getForge();
     proxyCa = {
       cert: forge.pki.certificateFromPem(certPem),
       key: forge.pki.privateKeyFromPem(keyPem),
@@ -370,6 +375,7 @@ async function loadOrMakeCa() {
     await preserveUnreadable(PROXY_CA_CERT());
   }
 
+  const forge = getForge();
   const keys = forge.pki.rsa.generateKeyPair(2048);
   const cert = forge.pki.createCertificate();
   cert.publicKey = keys.publicKey;
@@ -399,7 +405,7 @@ async function loadOrMakeCa() {
 
 let sharedLeafKeys = null;
 function leafKeys() {
-  if (!sharedLeafKeys) sharedLeafKeys = forge.pki.rsa.generateKeyPair(2048);
+  if (!sharedLeafKeys) sharedLeafKeys = getForge().pki.rsa.generateKeyPair(2048);
   return sharedLeafKeys;
 }
 
@@ -408,6 +414,7 @@ function leafFor(host) {
   const cached = leafCache.get(host);
   if (cached) return cached;
 
+  const forge = getForge();
   const keys = leafKeys();
   const cert = forge.pki.createCertificate();
   cert.publicKey = keys.publicKey;
@@ -1056,6 +1063,7 @@ function runCertutil(args) {
 
 async function caThumbprint() {
   const ca = await loadOrMakeCa();
+  const forge = getForge();
   const der = forge.asn1.toDer(forge.pki.certificateToAsn1(ca.cert)).getBytes();
   const digest = forge.md.sha1.create();
   digest.update(der);

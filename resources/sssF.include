@@ -551,6 +551,8 @@ bind "db:export"           to db.read   { id = arg 0 }
 bind "db:audit"            to db.manage { id = arg 0 }
 bind "db:listSavedQueries" to db.read   { root = arg 0 }
 bind "db:saveQuery"        to db.write  { root = arg 0 }
+bind "db:listHistory"      to db.read
+bind "db:clearHistory"     to db.manage
 bind "db:redisCommand"     to db.read   { id = arg 0 }
 
 

@@ -47,6 +47,7 @@ Copy-Item $node (Join-Path $out "node.exe")
 Write-Host "== assets / ui / out\main / sidecar / resources =="
 Copy-Item (Join-Path $root "native-host\assets") (Join-Path $out "assets") -Recurse
 Copy-Item (Join-Path $root "out\renderer")        (Join-Path $out "ui")     -Recurse
+Get-ChildItem -Path (Join-Path $out "ui") -Filter "*.map" -Recurse -File | Remove-Item -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $out "out") | Out-Null
 Copy-Item (Join-Path $root "out\main")            (Join-Path $out "out\main") -Recurse
 New-Item -ItemType Directory -Force -Path (Join-Path $out "sidecar\native")  | Out-Null

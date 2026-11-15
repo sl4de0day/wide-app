@@ -196,7 +196,7 @@ async function aiExecutePitcherEnv(root, input = {}, send) {
   return `Unknown pitcher_env action "${act}".`;
 }
 
-async function aiExecutePitcherSend(root, input = {}, send) {
+async function aiExecutePitcherSend(root, input = {}, send, signal = null) {
   const store = await aiReadPitcherEnvStore(root);
   const vars = aiBuildMergedPitcherVars(store, input.env);
   const rawUrl = aiSubstituteEnvVars(String(input.url ?? "").trim(), vars);
@@ -238,10 +238,14 @@ async function aiExecutePitcherSend(root, input = {}, send) {
   }
 
   let res;
+  if (signal?.aborted) {
+    return JSON.stringify({ ok: false, method, url: target, error: "Turn was stopped." }, null, 2);
+  }
   if (typeof sendOnce === "function") {
     res = await sendOnce(target, method, headerPairs, bodyStr, HTTP_MAX_REDIRECTS, {
       insecure: input.insecure !== false,
       bodyBase64: Boolean(input.bodyBase64),
+      ...(signal ? { signal } : {}),
     });
   } else {
     res = await aiControlInvoke("http:send", target, method, headerPairs, bodyStr, {
@@ -478,8 +482,9 @@ async function aiExecuteTerminalSession(root, input = {}, send) {
       }
     };
 
-    if (nodePty) {
-      const ptyChild = nodePty.spawn(spec.file, spec.args, {
+    const pty = getNodePty();
+    if (pty) {
+      const ptyChild = pty.spawn(spec.file, spec.args, {
         name: "xterm-256color",
         cols: Number(input.cols) || 120,
         rows: Number(input.rows) || 32,

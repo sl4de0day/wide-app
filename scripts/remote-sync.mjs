@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(fileURLToPath(import.meta.url), "..", "..");
 
 function fail(message) {
-  console.error(`\n  ✗ ${message}\n`);
+  console.error(`\n  [ERR] ${message}\n`);
   process.exit(1);
 }
 
@@ -93,7 +93,7 @@ if (noInstall) {
   );
 }
 
-console.log(`\n  ✓ Done.\n`);
+console.log(`\n  [OK] Done.\n`);
 console.log(`  In Wide: Settings → Remote`);
 console.log(`    · Run the backend over SSH:  on`);
 console.log(`    · SSH host:    ${host}`);

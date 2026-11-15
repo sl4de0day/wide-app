@@ -293,33 +293,40 @@ export function TerminalPanel() {
       sessionsRef.current.delete(tabId);
     }
 
-    setTabs((prev) => {
-      const nextTabs = prev.filter((t) => t.id !== tabId);
-      if (nextTabs.length === 0) {
-        return [];
-      }
-      return nextTabs;
-    });
-
+    const nextTabs = tabsRef.current.filter((t) => t.id !== tabId);
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
     if (activeIdRef.current === tabId) {
-      setTabs((prev) => {
-        const nextTabs = prev.filter((t) => t.id !== tabId);
-        if (nextTabs.length > 0) {
-          const last = nextTabs[nextTabs.length - 1];
-          setActiveId(last.id);
-        } else {
-          setActiveId(null);
-        }
-        return nextTabs;
-      });
+      const nextActiveId = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1].id : null;
+      activeIdRef.current = nextActiveId;
+      setActiveId(nextActiveId);
     }
   }, []);
 
+  const disposeAllSessions = useCallback((resetState: boolean) => {
+    for (const [id, session] of sessionsRef.current.entries()) {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (tab?.ptyId) void bridge.terminalDispose(tab.ptyId);
+      session.term.dispose();
+    }
+    sessionsRef.current.clear();
+    if (resetState) {
+      nextIndexRef.current = 1;
+      tabsRef.current = [];
+      activeIdRef.current = null;
+      setTabs([]);
+      setActiveId(null);
+    }
+  }, []);
+
+  const bootedRef = useRef(false);
   useEffect(() => {
-    if (tabs.length === 0) {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
+    if (tabsRef.current.length === 0) {
       createTerminal();
     }
-  }, [tabs.length, createTerminal]);
+  }, [createTerminal]);
 
   useEffect(() => {
     const offData = bridge.onTerminalData(({ id, text }) => {
@@ -355,44 +362,22 @@ export function TerminalPanel() {
       if (next.root === prev.root) return;
       openedOriginsRef.current.clear();
       useDevServers.getState().clear();
-
-      for (const [id, session] of sessionsRef.current.entries()) {
-        const tab = tabsRef.current.find((t) => t.id === id);
-        if (tab?.ptyId) void bridge.terminalDispose(tab.ptyId);
-        session.term.dispose();
-      }
-      sessionsRef.current.clear();
-      nextIndexRef.current = 1;
-      setTabs([]);
-      setActiveId(null);
+      disposeAllSessions(true);
     });
-  }, []);
+  }, [disposeAllSessions]);
 
   useEffect(() => {
     return useRemote.subscribe((next, prev) => {
       if (next.activeId === prev.activeId && next.activeContainer === prev.activeContainer) return;
-      for (const [id, session] of sessionsRef.current.entries()) {
-        const tab = tabsRef.current.find((t) => t.id === id);
-        if (tab?.ptyId) void bridge.terminalDispose(tab.ptyId);
-        session.term.dispose();
-      }
-      sessionsRef.current.clear();
-      nextIndexRef.current = 1;
-      setTabs([]);
-      setActiveId(null);
+      disposeAllSessions(true);
     });
-  }, []);
+  }, [disposeAllSessions]);
 
   useEffect(() => {
     return () => {
-      for (const [id, session] of sessionsRef.current.entries()) {
-        const tab = tabsRef.current.find((t) => t.id === id);
-        if (tab?.ptyId) void bridge.terminalDispose(tab.ptyId);
-        session.term.dispose();
-      }
-      sessionsRef.current.clear();
+      disposeAllSessions(false);
     };
-  }, []);
+  }, [disposeAllSessions]);
 
   const bindContainer = useCallback((tabId: string, node: HTMLDivElement | null) => {
     const session = sessionsRef.current.get(tabId);

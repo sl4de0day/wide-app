@@ -645,6 +645,16 @@ export interface PickedFile {
 }
 
 
+export interface AiBrowserHighlight {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  action: string;
+  target: string;
+  timestamp: number;
+}
+
 export interface AiBrowserDetectedInfo {
   found: boolean;
   executablePath: string;
@@ -660,12 +670,14 @@ export interface AiBrowserSessionState {
   loading: boolean;
   screenshot: string;
   lastAction: string;
+  lastHighlight?: AiBrowserHighlight | null;
   actions: { action: string; target?: string; url?: string; timestamp: number }[];
   domSummary: unknown[];
   logs: { type: string; text: string; url?: string; status?: number; method?: string; timestamp: number }[];
   canGoBack: boolean;
   canGoForward: boolean;
   proxyPort: number;
+  stealth?: boolean;
   browserLabel: string;
   installing: boolean;
   installStatus: string;
@@ -1321,6 +1333,7 @@ export interface HostApi {
   updateInstall(info: { version?: string; asset?: string; sums?: string }): Promise<Ok>;
   onUpdateProgress: Subscriber<{ phase: string; state: string; bytes?: number; error?: string }>;
   installLanguage(): Promise<Ok<{ language?: string }>>;
+  getDiagnostics(): Promise<Ok<{ platform?: string; arch?: string; pid?: number; uptimeMs?: number; logPath?: string; logTail?: string }>>;
   loadSettings(): Promise<Ok<{ settings?: Record<string, unknown> | null }>>;
   saveSettings(settings: Record<string, unknown>): Promise<Ok<unknown>>;
   loadTabs(root: string): Promise<Ok<{ tabs?: { files: string[]; active: string } | null }>>;
@@ -1474,7 +1487,9 @@ export interface HostApi {
   aiBrowserStatus(): Promise<Ok<{ detected?: AiBrowserDetectedInfo; session?: AiBrowserSessionState }>>;
   aiBrowserInstall(): Promise<Ok<{ executablePath?: string; label?: string; source?: string }>>;
   aiBrowserInput(payload: Record<string, unknown>): Promise<Ok>;
-  aiBrowserNav(payload: Record<string, unknown>): Promise<Ok<{ result?: unknown; session?: AiBrowserSessionState }>>;
+  aiBrowserNav(payload: Record<string, unknown>): Promise<
+    Ok<{ result?: unknown; har?: unknown; entryCount?: number; suggestedFilename?: string; session?: AiBrowserSessionState }>
+  >;
   onAiBrowserProgress: Subscriber<AiBrowserProgressEvent>;
   onMcpPending: Subscriber<McpPendingEvent>;
   mcpPending(): Promise<Ok<{ servers?: McpServerOffer[] }>>;
@@ -1547,6 +1562,8 @@ export interface HostApi {
   dbAudit(id: string): Promise<Ok<{ findings: DbAuditFinding[]; summary: DbAuditSummary }>>;
   dbListSavedQueries(root: string): Promise<Ok<{ queries: DbSavedQuery[] }>>;
   dbSaveQuery(root: string, name: string, sql: string): Promise<Ok<{ path: string; name: string }>>;
+  dbListHistory(connectionId?: string): Promise<Ok<{ history: DbQueryHistoryItem[] }>>;
+  dbClearHistory(connectionId?: string): Promise<Ok>;
   dbRedisCommand(
     id: string,
     action: "scan" | "get" | "info" | "del",
@@ -1732,6 +1749,16 @@ export interface DbSavedQuery {
   path: string;
   sql: string;
   updatedAt: number;
+}
+
+export interface DbQueryHistoryItem {
+  id: string;
+  connectionId: string;
+  sql: string;
+  durationMs: number;
+  rowCount: number;
+  error?: string;
+  ranAt: number;
 }
 
 export interface DbRedisKeyItem {
@@ -1961,6 +1988,7 @@ const fallback = {
   updateInstall: async () => (warn(), { ok: false, error: "No bridge" }),
   onUpdateProgress: noSub<{ phase: string; state: string; bytes?: number; error?: string }>(),
   installLanguage: async () => (warn(), { ok: false, error: "No bridge" }),
+  getDiagnostics: async () => (warn(), { ok: false, error: "No bridge" }),
   loadSettings: async () => (warn(), { ok: true, settings: null }),
   saveSettings: async () => (warn(), { ok: false, error: "No bridge" }),
   loadTabs: async () => (warn(), { ok: true, tabs: null }),
@@ -2092,6 +2120,8 @@ const fallback = {
   dbAudit: async () => (warn(), { ok: false, error: "No bridge" }),
   dbListSavedQueries: async () => (warn(), { ok: false, queries: [] }),
   dbSaveQuery: async () => (warn(), { ok: false, error: "No bridge" }),
+  dbListHistory: async () => (warn(), { ok: false, history: [] }),
+  dbClearHistory: async () => (warn(), { ok: false, error: "No bridge" }),
   dbRedisCommand: async () => (warn(), { ok: false, error: "No bridge" }),
 } as unknown as HostApi;
 

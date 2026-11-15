@@ -1,11 +1,11 @@
 [package]
 name = "wide-app"
-version = "0.4.141126"
+version = "0.5.151126"
 edition = "2021"
 
 [dependencies]
 tao = "0.37"
-wry = "0.57"
+wry = { version = "0.57", features = ["devtools"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 http = "1.0"

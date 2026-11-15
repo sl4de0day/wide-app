@@ -29,6 +29,12 @@ import { useWorkspace } from "./workspace";
 import { useSettings } from "./settings";
 import { toast } from "./toast";
 
+const keptChatUi: Record<string, { draft: string; scroll: number; pinned: boolean }> = {};
+
+export function keptChatUiFor(id: string): { draft: string; scroll: number; pinned: boolean } {
+  return (keptChatUi[id] ??= { draft: "", scroll: 0, pinned: true });
+}
+
 export interface AiToolStep {
   kind: "tool";
   name: string;
@@ -394,6 +400,7 @@ export const useAi = create<AiState>((set, get) => ({
   },
 
   closeChat: (id) => {
+    delete keptChatUi[id];
     const chat = get().chats[id];
     if (!chat) return;
     if (chat.activeTurn) {
@@ -408,6 +415,7 @@ export const useAi = create<AiState>((set, get) => ({
   },
 
   deleteSession: async (id) => {
+    delete keptChatUi[id];
     await bridge.aiDeleteSession(id);
     useEditor.getState().closeTab(`${AI_CHAT_PATH}${id}`);
     set((state) => {
@@ -983,6 +991,60 @@ export function openWideToolTab(tool: string, subtool?: string): void {
 }
 
 export function subscribeAiEvents(): () => void {
+  const pendingDeltas = new Map<string, { sessionId: string; turnId: string; text: string; thinking: string }>();
+  let flushHandle: number | ReturnType<typeof setTimeout> | null = null;
+  let flushIsRaf = false;
+
+  const cancelScheduledFlush = () => {
+    if (flushHandle === null) return;
+    if (flushIsRaf && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(flushHandle as number);
+    } else {
+      clearTimeout(flushHandle);
+    }
+    flushHandle = null;
+  };
+
+  const flushDeltas = () => {
+    cancelScheduledFlush();
+    if (pendingDeltas.size === 0) return;
+    const batches = Array.from(pendingDeltas.values());
+    pendingDeltas.clear();
+    useAi.setState((state) => {
+      let chats = state.chats;
+      for (const batch of batches) {
+        const chat = chats[batch.sessionId];
+        if (!chat) continue;
+        let changed = false;
+        const turns = chat.turns.map((turn) => {
+          if (turn.id !== batch.turnId) return turn;
+          changed = true;
+          return {
+            ...turn,
+            text: batch.text ? turn.text + batch.text : turn.text,
+            thinking: batch.thinking ? turn.thinking + batch.thinking : turn.thinking,
+          };
+        });
+        if (changed) {
+          if (chats === state.chats) chats = { ...state.chats };
+          chats[batch.sessionId] = { ...chat, turns };
+        }
+      }
+      return chats === state.chats ? state : { chats };
+    });
+  };
+
+  const scheduleFlush = () => {
+    if (flushHandle !== null) return;
+    if (typeof requestAnimationFrame === "function") {
+      flushIsRaf = true;
+      flushHandle = requestAnimationFrame(flushDeltas);
+    } else {
+      flushIsRaf = false;
+      flushHandle = setTimeout(flushDeltas, 16);
+    }
+  };
+
   const unsubProgress = bridge.onAiBrowserProgress((ev) => {
     useAiBrowser.getState().setInstallProgress(ev.status, ev.installing);
   });
@@ -1093,6 +1155,20 @@ export function subscribeAiEvents(): () => void {
     }
 
     const sessionId = sessionOf(event.id);
+    if (event.type === "text" || event.type === "thinking") {
+      const key = `${sessionId}\0${event.id}`;
+      let entry = pendingDeltas.get(key);
+      if (!entry) {
+        entry = { sessionId, turnId: event.id, text: "", thinking: "" };
+        pendingDeltas.set(key, entry);
+      }
+      if (event.type === "text") entry.text += event.text;
+      else entry.thinking += event.text;
+      scheduleFlush();
+      return;
+    }
+
+    flushDeltas();
     const settles = event.type === "done" || event.type === "error";
     const now = Date.now();
     useAi.setState((state) => ({
@@ -1106,10 +1182,6 @@ export function subscribeAiEvents(): () => void {
         turns: chat.turns.map((turn) => {
           if (turn.id !== event.id) return turn;
           switch (event.type) {
-            case "text":
-              return { ...turn, text: turn.text + event.text };
-            case "thinking":
-              return { ...turn, thinking: turn.thinking + event.text };
             case "tool_start":
               return {
                 ...turn,
@@ -1195,6 +1267,7 @@ export function subscribeAiEvents(): () => void {
     }));
   });
   return () => {
+    flushDeltas();
     unsubProgress();
     unsubEvents();
   };

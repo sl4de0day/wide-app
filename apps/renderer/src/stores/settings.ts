@@ -78,9 +78,28 @@ function valuesOf(state: SettingsState): Settings {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingSettingsSnapshot: Settings | null = null;
+
+function flushPendingSettingsSave(): void {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (!pendingSettingsSnapshot) return;
+  const snapshot = pendingSettingsSnapshot;
+  pendingSettingsSnapshot = null;
+  void bridge.saveSettings(snapshot as unknown as Record<string, unknown>);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", flushPendingSettingsSave);
+}
 function persistToDisk(values: Settings): void {
+  pendingSettingsSnapshot = values;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    saveTimer = null;
+    pendingSettingsSnapshot = null;
     void bridge.saveSettings(values as unknown as Record<string, unknown>).catch(() => undefined);
   }, 250);
 }

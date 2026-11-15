@@ -16,7 +16,18 @@ const FRAME_MAX = 5000;
 
 let ruleTimer: ReturnType<typeof setTimeout> | null = null;
 
+const MAX_SCANNED_KEYS = 2000;
 const scannedKeys = new Set<string>();
+
+function rememberScannedKey(key: string): boolean {
+  if (scannedKeys.has(key)) return false;
+  if (scannedKeys.size >= MAX_SCANNED_KEYS) {
+    const oldest = scannedKeys.values().next().value;
+    if (oldest !== undefined) scannedKeys.delete(oldest);
+  }
+  scannedKeys.add(key);
+  return true;
+}
 
 interface ProxyState {
   running: boolean;
@@ -213,8 +224,7 @@ export const useProxy = create<ProxyState>((set, get) => ({
         if (issues.length) nextIssueCounts[entry.id] = issues.length;
         for (const issue of issues) {
           const key = `${entry.host}:${issue.checkId}`;
-          if (scannedKeys.has(key)) continue;
-          scannedKeys.add(key);
+          if (!rememberScannedKey(key)) continue;
           findingsToAdd.push({
             title: issue.title,
             severity: issue.severity,
@@ -252,8 +262,7 @@ export const useProxy = create<ProxyState>((set, get) => ({
       if (issues.length) nextIssueCounts[entry.id] = issues.length;
       for (const issue of issues) {
         const key = `${entry.host}:${issue.checkId}`;
-        if (scannedKeys.has(key)) continue;
-        scannedKeys.add(key);
+        if (!rememberScannedKey(key)) continue;
         useFindings.getState().add({
           title: issue.title,
           severity: issue.severity,
@@ -279,36 +288,7 @@ export const useProxy = create<ProxyState>((set, get) => ({
   },
 
   ingestFrame: (frame) =>
-    set((state) => {
-      const entries = [...state.entries];
-      const at = entries.findIndex((entry) => entry.id === frame.id);
-      const framePart = { direction: frame.direction, kind: frame.kind, text: frame.text, bytes: frame.bytes, at: frame.at };
-      if (at === -1) {
-        entries.push({
-          id: frame.id,
-          at: frame.at ?? Date.now(),
-          ms: 0,
-          method: "WS",
-          url: "",
-          host: "",
-          scheme: "https",
-          status: 101,
-          reqHeaders: [],
-          reqBody: "",
-          resHeaders: [],
-          resBody: "",
-          websocket: true,
-          frames: [framePart as ProxyWsFrame],
-        });
-        if (entries.length > MAX) entries.shift();
-      } else {
-
-        const next = [...(entries[at].frames ?? []), framePart as ProxyWsFrame];
-        if (next.length > FRAME_MAX) next.splice(0, next.length - FRAME_MAX);
-        entries[at] = { ...entries[at], frames: next };
-      }
-      return { entries };
-    }),
+    set((state) => ({ entries: applyWsFramesToEntries(state.entries, [frame]) })),
 
   exportSession: () => {
     const { scope, rules, entries } = get();
@@ -321,11 +301,15 @@ export const useProxy = create<ProxyState>((set, get) => ({
       if (!data || typeof data !== "object") return false;
       const scope = Array.isArray(data.scope) ? data.scope : get().scope;
       const rules = Array.isArray(data.rules) ? data.rules : get().rules;
+      const rawEntries = Array.isArray(data.entries) ? data.entries : [];
+      const entries = rawEntries.length > MAX ? rawEntries.slice(rawEntries.length - MAX) : rawEntries;
+      scannedKeys.clear();
       set({
-        entries: Array.isArray(data.entries) ? data.entries : [],
+        entries,
         scope,
         rules,
         selected: null,
+        issueCounts: {},
       });
       void bridge.proxyScope(scope);
       void bridge.proxyMatchReplace(rules);
@@ -336,13 +320,55 @@ export const useProxy = create<ProxyState>((set, get) => ({
   },
 }));
 
+function applyWsFramesToEntries(currentEntries: ProxyEntry[], batch: ProxyWsFrame[]): ProxyEntry[] {
+  const entries = [...currentEntries];
+  const indexById = new Map<number, number>();
+  for (let i = 0; i < entries.length; i += 1) indexById.set(entries[i].id, i);
+
+  for (const frame of batch) {
+    const framePart = { direction: frame.direction, kind: frame.kind, text: frame.text, bytes: frame.bytes, at: frame.at };
+    const at = indexById.get(frame.id);
+    if (at === undefined) {
+      entries.push({
+        id: frame.id,
+        at: frame.at ?? Date.now(),
+        ms: 0,
+        method: "WS",
+        url: "",
+        host: "",
+        scheme: "https",
+        status: 101,
+        reqHeaders: [],
+        reqBody: "",
+        resHeaders: [],
+        resBody: "",
+        websocket: true,
+        frames: [framePart as ProxyWsFrame],
+      });
+      if (entries.length > MAX) {
+        const dropped = entries.shift();
+        if (dropped) indexById.delete(dropped.id);
+        indexById.clear();
+        for (let i = 0; i < entries.length; i += 1) indexById.set(entries[i].id, i);
+      } else {
+        indexById.set(frame.id, entries.length - 1);
+      }
+    } else {
+      const next = [...(entries[at].frames ?? []), framePart as ProxyWsFrame];
+      if (next.length > FRAME_MAX) next.splice(0, next.length - FRAME_MAX);
+      entries[at] = { ...entries[at], frames: next };
+    }
+  }
+  return entries;
+}
+
 export function subscribeProxyTraffic(): () => void {
   const offTraffic = bridge.onProxyTraffic((batch) => {
     useProxy.getState().ingestBatch(batch);
   });
   const offWs = bridge.onProxyWs((batch) => {
-    const s = useProxy.getState();
-    for (const frame of batch) s.ingestFrame(frame);
+    if (batch.length === 0) return;
+    useProxy.setState((state) => ({ entries: applyWsFramesToEntries(state.entries, batch) }));
   });
   const offIntercept = bridge.onProxyIntercept((request) => useProxy.getState().ingestIntercept(request));
   const offInterceptRes = bridge.onProxyInterceptResponse((response) => useProxy.getState().ingestInterceptResponse(response));

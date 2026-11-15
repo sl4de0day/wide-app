@@ -28,15 +28,24 @@ export default defineConfig({
     outDir: fileURLToPath(new URL("../../out/renderer", import.meta.url)),
     emptyOutDir: true,
     target: "es2022",
-    sourcemap: true,
+    sourcemap: process.env.WIDE_SOURCEMAP === "1",
     rollupOptions: {
       output: {
-
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
           const path = id.split("\\").join("/");
-          if (path.includes("react")) return "react";
+          if (
+            path.includes("/node_modules/react/") ||
+            path.includes("/node_modules/react-dom/") ||
+            path.includes("/node_modules/scheduler/")
+          ) {
+            return "react";
+          }
           if (path.includes("/@xterm/")) return "xterm";
+          if (path.includes("/node_modules/lucide-react/")) return "lucide";
+          if (path.includes("/node_modules/sql-formatter/")) return "sql-formatter";
+          if (path.includes("/node_modules/graphql/")) return "graphql";
+          if (path.includes("/node_modules/marked/")) return "marked";
           if (CODEMIRROR_CORE.some((pkg) => path.includes(`/node_modules/${pkg}/`))) {
             return "codemirror";
           }

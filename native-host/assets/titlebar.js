@@ -7,10 +7,14 @@
   function cmd(name) { try { wv.postMessage({ type: "host-cmd", cmd: name }); } catch (e) {} }
 
   function regionOf(el) {
-    while (el && el.nodeType === 1) {
-      var r = getComputedStyle(el).getPropertyValue("-webkit-app-region") ||
-              getComputedStyle(el).getPropertyValue("app-region");
-      if (r) { r = r.trim(); if (r === "drag" || r === "no-drag") return r; }
+    while (el && el.nodeType === 1 && el !== document.documentElement) {
+      if (el.classList) {
+        if (el.classList.contains("no-drag")) return "no-drag";
+        if (el.classList.contains("drag-region")) return "drag";
+      }
+      var style = el.style;
+      var inline = style && (style.webkitAppRegion || style.appRegion);
+      if (inline === "drag" || inline === "no-drag") return inline;
       el = el.parentElement;
     }
     return "";

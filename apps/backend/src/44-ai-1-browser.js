@@ -6,12 +6,14 @@ const aiBrowserSession = {
   loading: false,
   screenshot: "",
   lastAction: "idle",
+  lastHighlight: null,
   actions: [],
   domSummary: [],
   logs: [],
   canGoBack: false,
   canGoForward: false,
   proxyPort: 0,
+  stealth: false,
   browserLabel: "",
   installing: false,
   installStatus: "",
@@ -27,21 +29,191 @@ const aiBrowserRuntime = {
   browserLabel: "",
   proxyPort: 0,
   bypassProxy: false,
+  stealth: false,
+  launchStealth: false,
+  appliedStealth: false,
   consoleLogs: [],
+  networkRequests: new Map(),
+  harEntries: [],
+  harStartedAt: "",
   lastFrameAt: 0,
   emitFn: null,
+  inputCaptureTimer: null,
+  installChild: null,
   closing: false,
   launchPromise: null,
   installPromise: null,
 };
 
-function aiBrowserBroadcast(payload) {
+const AI_BROWSER_EMOJI_ZWJ_RE = /(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u2600-\u27BF])(?:\uFE0F|\uFE0E|[\u{1F3FB}-\u{1F3FF}])?(?:\u200D(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u2600-\u27BF])(?:\uFE0F|\uFE0E|[\u{1F3FB}-\u{1F3FF}])?)+/gu;
+const AI_BROWSER_EMOJI_KEYCAP_RE = /[0-9#*]\uFE0F?\u20E3/gu;
+const AI_BROWSER_EMOJI_SUPP_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]/gu;
+const AI_BROWSER_EMOJI_PICT_RE = /\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?/gu;
+const AI_BROWSER_EMOJI_PRES_RE = /\p{Emoji_Presentation}(?:\uFE0F|\uFE0E)?/gu;
+const AI_BROWSER_EMOJI_BMP_RE = /[\u231A-\u23FF\u2600-\u27BF\u2B05-\u2B55][\uFE0E\uFE0F]?|[\u2139\u2194-\u21AA\u24C2\u25AA-\u25FE\u2934-\u2935\u3030\u303D\u3297\u3299]\uFE0F|[\uFE0E\uFE0F\u20E3]/gu;
+
+function aiBrowserStripEmojis(text) {
+  const raw = String(text ?? "");
+  const cleaned =
+    typeof aiStripAllEmojis === "function"
+      ? aiStripAllEmojis(raw, true)
+      : raw
+          .replace(AI_BROWSER_EMOJI_ZWJ_RE, "")
+          .replace(AI_BROWSER_EMOJI_KEYCAP_RE, "")
+          .replace(AI_BROWSER_EMOJI_SUPP_RE, "")
+          .replace(AI_BROWSER_EMOJI_PICT_RE, "")
+          .replace(AI_BROWSER_EMOJI_PRES_RE, "")
+          .replace(AI_BROWSER_EMOJI_BMP_RE, "")
+          .replace(/[\uD800-\uDFFF]/g, "");
+  return cleaned.replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function aiBrowserClampHighlight(box, label, action) {
+  if (!box || !Number.isFinite(Number(box.x)) || !Number.isFinite(Number(box.y))) return null;
+  const rawW = Number(box.width ?? box.w ?? 0);
+  const rawH = Number(box.height ?? box.h ?? 0);
+  if (rawW <= 0 || rawH <= 0) return null;
+  const x = Math.max(0, Math.min(1279, Math.round(Number(box.x))));
+  const y = Math.max(0, Math.min(799, Math.round(Number(box.y))));
+  const width = Math.max(4, Math.min(1280 - x, Math.round(rawW)));
+  const height = Math.max(4, Math.min(800 - y, Math.round(rawH)));
+  return {
+    x,
+    y,
+    width,
+    height,
+    action: aiBrowserStripEmojis(String(action || "")) || "action",
+    target: aiBrowserStripEmojis(String(label || "")).slice(0, 60),
+    timestamp: Date.now(),
+  };
+}
+
+function aiBrowserParseQueryString(urlStr) {
   try {
-    if (typeof aiBrowserRuntime.emitFn === "function") {
-      aiBrowserRuntime.emitFn(payload);
+    const parsed = new URL(String(urlStr || ""));
+    const out = [];
+    for (const [name, value] of parsed.searchParams.entries()) {
+      out.push({ name, value });
     }
+    return out;
   } catch {
-    void 0;
+    return [];
+  }
+}
+
+const AI_BROWSER_SENSITIVE_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "x-api-key",
+  "x-auth-token",
+  "x-csrf-token",
+]);
+
+function aiBrowserRedactHarHeaders(headers) {
+  const out = [];
+  if (Array.isArray(headers)) {
+    for (const h of headers) {
+      if (!h || !h.name) continue;
+      const name = String(h.name);
+      const sensitive = AI_BROWSER_SENSITIVE_HEADERS.has(name.toLowerCase());
+      out.push({ name, value: sensitive ? "[REDACTED]" : String(h.value ?? "") });
+    }
+    return out;
+  }
+  if (headers && typeof headers === "object") {
+    for (const [name, value] of Object.entries(headers)) {
+      const sensitive = AI_BROWSER_SENSITIVE_HEADERS.has(name.toLowerCase());
+      out.push({ name, value: sensitive ? "[REDACTED]" : String(value ?? "") });
+    }
+  }
+  return out;
+}
+
+function aiBrowserStealthInitScript() {
+  return () => {
+    try {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined, configurable: true });
+    } catch {}
+    try {
+      if (!navigator.languages || navigator.languages.length === 0) {
+        Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"], configurable: true });
+      }
+    } catch {}
+    try {
+      if (!navigator.plugins || navigator.plugins.length === 0) {
+        Object.defineProperty(navigator, "plugins", {
+          get: () => [
+            { name: "Chrome PDF Plugin", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+            { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "" },
+            { name: "Native Client", filename: "internal-nacl-plugin", description: "" },
+          ],
+          configurable: true,
+        });
+      }
+    } catch {}
+    try {
+      if (!window.chrome) {
+        Object.defineProperty(window, "chrome", {
+          value: { runtime: {}, app: { isInstalled: false } },
+          configurable: true,
+        });
+      }
+    } catch {}
+    try {
+      if (navigator.permissions && typeof navigator.permissions.query === "function") {
+        const origQuery = navigator.permissions.query.bind(navigator.permissions);
+        navigator.permissions.query = (parameters) =>
+          parameters && parameters.name === "notifications"
+            ? Promise.resolve({ state: typeof Notification !== "undefined" ? Notification.permission : "default" })
+            : origQuery(parameters);
+      }
+    } catch {}
+  };
+}
+
+function aiBrowserStealthUserAgent() {
+  if (process.platform === "darwin") {
+    return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  }
+  if (process.platform === "linux") {
+    return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  }
+  return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+}
+
+function aiBrowserBuildHarLog(opts = {}) {
+  const limit = Math.max(1, Math.min(500, Number(opts.limit) || 500));
+  const filter = String(opts.urlFilter || "").trim().toLowerCase();
+  const filtered = filter
+    ? aiBrowserRuntime.harEntries.filter((entry) => String(entry?.request?.url || "").toLowerCase().includes(filter))
+    : aiBrowserRuntime.harEntries;
+  return {
+    log: {
+      version: "1.2",
+      creator: { name: "Wide AI Browser", version: "1.0" },
+      pages: [
+        {
+          startedDateTime: aiBrowserRuntime.harStartedAt || new Date().toISOString(),
+          id: "page_1",
+          title: aiBrowserStripEmojis(aiBrowserSession.title || aiBrowserSession.url || "New Tab") || "New Tab",
+          pageTimings: { onContentLoad: -1, onLoad: -1 },
+        },
+      ],
+      entries: filtered.slice(-limit),
+    },
+  };
+}
+
+function aiBrowserBroadcast(payload) {
+  if (typeof aiBrowserRuntime.emitFn === "function") {
+    try {
+      aiBrowserRuntime.emitFn(payload);
+      return;
+    } catch {
+      aiBrowserRuntime.emitFn = null;
+    }
   }
   try {
     if (typeof broadcast === "function") {
@@ -173,14 +345,30 @@ async function aiBrowserInstallChromium(emit) {
   }
 
   aiBrowserRuntime.installPromise = new Promise((resolve) => {
+    let settled = false;
     const child = node_child_process.spawn(process.execPath, [cli, "install", "chromium"], {
       windowsHide: true,
       env: { ...process.env, CI: "1" },
     });
+    aiBrowserRuntime.installChild = child;
     let output = "";
+    const finish = (res) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      aiBrowserRuntime.installChild = null;
+      aiBrowserSession.installing = false;
+      resolve(res);
+    };
+    const timeoutTimer = setTimeout(() => {
+      try { killProcessTree(child); } catch {}
+      aiBrowserSession.installStatus = "Chromium installation timed out after 180s.";
+      finish({ ok: false, error: aiBrowserSession.installStatus });
+    }, 180000);
+    timeoutTimer.unref?.();
     const pushLine = (chunk) => {
       const text = chunk.toString("utf8");
-      output += text;
+      output = (output + text).slice(-16384);
       const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const last = lines[lines.length - 1];
       if (last) {
@@ -197,19 +385,17 @@ async function aiBrowserInstallChromium(emit) {
     child.stdout?.on("data", pushLine);
     child.stderr?.on("data", pushLine);
     child.on("error", (err) => {
-      aiBrowserSession.installing = false;
       aiBrowserSession.installStatus = String(err.message || err);
-      resolve({ ok: false, error: aiBrowserSession.installStatus });
+      finish({ ok: false, error: aiBrowserSession.installStatus });
     });
     child.on("close", (code) => {
-      aiBrowserSession.installing = false;
       const detected = aiBrowserDetectInstalled();
       if (code === 0 && detected.installed) {
         aiBrowserSession.installStatus = `${detected.label} ready`;
-        resolve({ ok: true, ...detected });
+        finish({ ok: true, ...detected });
       } else {
         aiBrowserSession.installStatus = output.slice(-240).trim() || `Installer exited with code ${code}`;
-        resolve({ ok: false, error: aiBrowserSession.installStatus });
+        finish({ ok: false, error: aiBrowserSession.installStatus });
       }
     });
   }).finally(() => {
@@ -265,7 +451,8 @@ async function aiBrowserSyncNavState() {
   if (!page || page.isClosed()) return;
   try {
     aiBrowserSession.url = page.url() || "about:blank";
-    aiBrowserSession.title = (await page.title().catch(() => "")) || aiBrowserSession.url;
+    const rawTitle = (await page.title().catch(() => "")) || aiBrowserSession.url;
+    aiBrowserSession.title = aiBrowserStripEmojis(rawTitle) || aiBrowserSession.url;
   } catch {
     void 0;
   }
@@ -291,13 +478,16 @@ function aiBrowserEmitFrame(force = false) {
   const now = Date.now();
   if (!force && now - aiBrowserRuntime.lastFrameAt < 65) return;
   aiBrowserRuntime.lastFrameAt = now;
+  const safeTitle = aiBrowserStripEmojis(aiBrowserSession.title) || aiBrowserSession.url;
+  aiBrowserSession.title = safeTitle;
   aiBrowserBroadcast({
     type: "browser_frame",
     url: aiBrowserSession.url,
-    title: aiBrowserSession.title,
+    title: safeTitle,
     loading: aiBrowserSession.loading,
     screenshot: aiBrowserSession.screenshot,
     proxyPort: aiBrowserSession.proxyPort,
+    stealth: Boolean(aiBrowserSession.stealth),
     browserLabel: aiBrowserSession.browserLabel,
     canGoBack: aiBrowserSession.canGoBack,
     canGoForward: aiBrowserSession.canGoForward,
@@ -309,19 +499,27 @@ function aiBrowserEmitAction(action, target, extra = {}) {
   const now = Date.now();
   const safeExtra = { ...extra };
   delete safeExtra.screenshot;
+  const safeTitle = aiBrowserStripEmojis(aiBrowserSession.title) || aiBrowserSession.url;
+  aiBrowserSession.title = safeTitle;
+  const cleanAction = aiBrowserStripEmojis(action) || "action";
+  const cleanTarget = target ? aiBrowserStripEmojis(String(target)).slice(0, 120) : undefined;
+  const highlight = safeExtra.highlight && typeof safeExtra.highlight === "object" ? safeExtra.highlight : null;
+  aiBrowserSession.lastHighlight = highlight;
   const entry = {
     id: `act-${now}-${Math.random().toString(36).slice(2, 6)}`,
-    action,
+    action: cleanAction,
     url: aiBrowserSession.url,
-    title: aiBrowserSession.title,
-    target: target ? String(target).slice(0, 120) : undefined,
+    title: safeTitle,
+    target: cleanTarget,
     loading: aiBrowserSession.loading,
     proxyPort: aiBrowserSession.proxyPort,
+    stealth: Boolean(aiBrowserSession.stealth),
     browserLabel: aiBrowserSession.browserLabel,
+    highlight,
     timestamp: now,
     ...safeExtra,
   };
-  aiBrowserSession.lastAction = action;
+  aiBrowserSession.lastAction = cleanAction;
   aiBrowserSession.actions.push(entry);
   if (aiBrowserSession.actions.length > 60) {
     aiBrowserSession.actions.splice(0, aiBrowserSession.actions.length - 60);
@@ -399,6 +597,115 @@ async function aiBrowserAttachPage(page, context) {
   try {
     const cdp = await context.newCDPSession(page);
     aiBrowserRuntime.cdp = cdp;
+    aiBrowserRuntime.networkRequests = new Map();
+    if (!aiBrowserRuntime.harStartedAt) {
+      aiBrowserRuntime.harStartedAt = new Date().toISOString();
+    }
+    cdp.on("Network.requestWillBeSent", (evt) => {
+      try {
+        if (!evt || !evt.requestId || !evt.request) return;
+        const reqUrl = String(evt.request.url || "");
+        if (reqUrl.startsWith("data:") || reqUrl.startsWith("blob:")) return;
+        const compactRequest = {
+          url: reqUrl,
+          method: evt.request.method,
+          headers: evt.request.headers,
+          postData: typeof evt.request.postData === "string" ? evt.request.postData.slice(0, 4096) : undefined,
+        };
+        aiBrowserRuntime.networkRequests.set(evt.requestId, {
+          requestId: evt.requestId,
+          startedDateTime: evt.wallTime ? new Date(evt.wallTime * 1000).toISOString() : new Date().toISOString(),
+          startTimestamp: Number(evt.timestamp || 0),
+          request: compactRequest,
+          response: null,
+          endTimestamp: Number(evt.timestamp || 0),
+          encodedDataLength: 0,
+          failedText: "",
+        });
+        if (aiBrowserRuntime.networkRequests.size > 400) {
+          const oldest = aiBrowserRuntime.networkRequests.keys().next().value;
+          if (oldest !== undefined) aiBrowserRuntime.networkRequests.delete(oldest);
+        }
+      } catch {
+        void 0;
+      }
+    });
+    cdp.on("Network.responseReceived", (evt) => {
+      try {
+        const rec = evt?.requestId ? aiBrowserRuntime.networkRequests.get(evt.requestId) : null;
+        if (rec) {
+          rec.response = evt.response || null;
+          rec.endTimestamp = Number(evt.timestamp || rec.startTimestamp || 0);
+        }
+      } catch {
+        void 0;
+      }
+    });
+    const finalizeHarRequest = (requestId, endTimestamp, encodedLength, failedText = "") => {
+      try {
+        const rec = requestId ? aiBrowserRuntime.networkRequests.get(requestId) : null;
+        if (!rec) return;
+        aiBrowserRuntime.networkRequests.delete(requestId);
+        const endTs = Number(endTimestamp || rec.endTimestamp || rec.startTimestamp || 0);
+        const elapsedMs = rec.startTimestamp > 0 && endTs >= rec.startTimestamp ? Math.round((endTs - rec.startTimestamp) * 1000) : 0;
+        const reqUrl = String(rec.request?.url || "");
+        if (reqUrl.startsWith("data:") || reqUrl.startsWith("blob:")) return;
+        const postText = typeof rec.request?.postData === "string" ? rec.request.postData : "";
+        const resp = rec.response || {};
+        const respHeaders = aiBrowserRedactHarHeaders(resp.headers);
+        const entry = {
+          pageref: "page_1",
+          startedDateTime: rec.startedDateTime,
+          time: elapsedMs,
+          request: {
+            method: String(rec.request?.method || "GET"),
+            url: reqUrl,
+            httpVersion: String(resp.protocol || "HTTP/1.1"),
+            cookies: [],
+            headers: aiBrowserRedactHarHeaders(rec.request?.headers),
+            queryString: aiBrowserParseQueryString(reqUrl),
+            headersSize: -1,
+            bodySize: postText ? Buffer.byteLength(postText, "utf8") : 0,
+            ...(postText
+              ? {
+                  postData: {
+                    mimeType: String(rec.request?.headers?.["Content-Type"] || rec.request?.headers?.["content-type"] || "text/plain"),
+                    text: postText.slice(0, 4096),
+                  },
+                }
+              : {}),
+          },
+          response: {
+            status: Number(resp.status || 0),
+            statusText: failedText || String(resp.statusText || ""),
+            httpVersion: String(resp.protocol || "HTTP/1.1"),
+            cookies: [],
+            headers: respHeaders,
+            content: {
+              size: Number(encodedLength || resp.encodedDataLength || 0),
+              mimeType: String(resp.mimeType || "x-unknown"),
+            },
+            redirectURL: "",
+            headersSize: -1,
+            bodySize: Number(encodedLength || resp.encodedDataLength || 0),
+          },
+          cache: {},
+          timings: { send: 0, wait: elapsedMs, receive: 0 },
+        };
+        aiBrowserRuntime.harEntries.push(entry);
+        if (aiBrowserRuntime.harEntries.length > 500) {
+          aiBrowserRuntime.harEntries.splice(0, aiBrowserRuntime.harEntries.length - 500);
+        }
+      } catch {
+        void 0;
+      }
+    };
+    cdp.on("Network.loadingFinished", (evt) => {
+      finalizeHarRequest(evt?.requestId, evt?.timestamp, evt?.encodedDataLength, "");
+    });
+    cdp.on("Network.loadingFailed", (evt) => {
+      finalizeHarRequest(evt?.requestId, evt?.timestamp, 0, evt?.errorText || "Failed");
+    });
     cdp.on("Page.screencastFrame", (evt) => {
       try {
         if (evt.sessionId) {
@@ -412,6 +719,7 @@ async function aiBrowserAttachPage(page, context) {
         void 0;
       }
     });
+    await cdp.send("Network.enable").catch(() => {});
     await cdp.send("Page.enable").catch(() => {});
     await cdp
       .send("Page.startScreencast", {
@@ -427,22 +735,31 @@ async function aiBrowserAttachPage(page, context) {
   }
 }
 
-async function aiBrowserEnsureReady({ clearSession = false, bypassProxy = false, emit = null } = {}) {
+async function aiBrowserEnsureReady({ clearSession = false, bypassProxy = false, stealth = undefined, emit = null } = {}) {
+  while (aiBrowserRuntime.launchPromise) {
+    await aiBrowserRuntime.launchPromise.catch(() => {});
+  }
   if (emit) aiBrowserRuntime.emitFn = emit;
   aiBrowserRuntime.bypassProxy = Boolean(bypassProxy);
+  if (typeof stealth === "boolean") {
+    aiBrowserRuntime.stealth = stealth;
+    aiBrowserSession.stealth = stealth;
+  }
   const desiredProxyPort = aiBrowserActiveProxyPort();
+  const desiredStealth = Boolean(aiBrowserRuntime.stealth);
+  if (clearSession) {
+    aiBrowserRuntime.harEntries = [];
+    aiBrowserRuntime.harStartedAt = "";
+  }
 
   if (
     aiBrowserRuntime.page &&
     !aiBrowserRuntime.page.isClosed() &&
     !clearSession &&
-    aiBrowserRuntime.proxyPort === desiredProxyPort
+    aiBrowserRuntime.proxyPort === desiredProxyPort &&
+    aiBrowserRuntime.appliedStealth === desiredStealth
   ) {
     return aiBrowserRuntime.page;
-  }
-
-  if (aiBrowserRuntime.launchPromise) {
-    return aiBrowserRuntime.launchPromise;
   }
 
   aiBrowserRuntime.launchPromise = (async () => {
@@ -463,6 +780,7 @@ async function aiBrowserEnsureReady({ clearSession = false, bypassProxy = false,
 
     if (aiBrowserRuntime.context) {
       if (!clearSession) await aiBrowserSaveStorageState();
+      try { await aiBrowserRuntime.cdp?.send("Page.stopScreencast").catch(() => {}); } catch {}
       try { await aiBrowserRuntime.cdp?.detach().catch(() => {}); } catch {}
       await aiBrowserRuntime.context.close().catch(() => {});
       aiBrowserRuntime.context = null;
@@ -473,65 +791,107 @@ async function aiBrowserEnsureReady({ clearSession = false, bypassProxy = false,
     const needNewBrowser =
       !aiBrowserRuntime.browser ||
       !aiBrowserRuntime.browser.isConnected() ||
-      aiBrowserRuntime.executablePath !== detected.executablePath;
+      aiBrowserRuntime.executablePath !== detected.executablePath ||
+      aiBrowserRuntime.launchStealth !== desiredStealth;
 
-    if (needNewBrowser) {
-      if (aiBrowserRuntime.browser) {
+    let launchedNewBrowser = false;
+    let context = null;
+    try {
+      if (needNewBrowser) {
+        if (aiBrowserRuntime.browser) {
+          await aiBrowserRuntime.browser.close().catch(() => {});
+          aiBrowserRuntime.browser = null;
+        }
+        const launchArgs = [
+          "--disable-background-timer-throttling",
+          "--disable-renderer-backgrounding",
+          "--disable-dev-shm-usage",
+          "--ignore-certificate-errors",
+          "--allow-insecure-localhost",
+          "--window-size=1280,800",
+        ];
+        if (desiredStealth) {
+          launchArgs.push("--disable-blink-features=AutomationControlled");
+        }
+        if (process.platform === "linux") launchArgs.push("--no-sandbox");
+
+        const browser = await pw.chromium.launch({
+          executablePath: detected.executablePath || undefined,
+          headless: true,
+          args: launchArgs,
+        });
+        launchedNewBrowser = true;
+        browser.on("disconnected", () => {
+          if (aiBrowserRuntime.browser === browser) {
+            aiBrowserRuntime.browser = null;
+            aiBrowserRuntime.context = null;
+            aiBrowserRuntime.page = null;
+            aiBrowserRuntime.cdp = null;
+            aiBrowserSession.open = false;
+            aiBrowserSession.active = false;
+            aiBrowserSession.loading = false;
+            aiBrowserSession.screenshot = "";
+          }
+        });
+        aiBrowserRuntime.browser = browser;
+        aiBrowserRuntime.executablePath = detected.executablePath;
+        aiBrowserRuntime.launchStealth = desiredStealth;
+        aiBrowserRuntime.browserLabel = detected.label;
+        aiBrowserSession.browserLabel = detected.label;
+      }
+
+      const statePath = aiBrowserStateFile();
+      if (clearSession && statePath) {
+        try { await promises.rm(statePath, { force: true }); } catch {}
+      }
+
+      const contextOptions = {
+        viewport: { width: 1280, height: 800 },
+        ignoreHTTPSErrors: true,
+        acceptDownloads: true,
+      };
+      if (desiredStealth) {
+        contextOptions.userAgent = aiBrowserStealthUserAgent();
+        contextOptions.locale = "en-US";
+      }
+      if (!clearSession && statePath && node_fs.existsSync(statePath)) {
+        contextOptions.storageState = statePath;
+      }
+      if (desiredProxyPort > 0) {
+        contextOptions.proxy = { server: `http://127.0.0.1:${desiredProxyPort}` };
+      }
+
+      context = await aiBrowserRuntime.browser.newContext(contextOptions);
+      if (desiredStealth) {
+        await context.addInitScript(aiBrowserStealthInitScript()).catch(() => {});
+      }
+      const page = await context.newPage();
+      aiBrowserRuntime.proxyPort = desiredProxyPort;
+      aiBrowserRuntime.appliedStealth = desiredStealth;
+      aiBrowserSession.proxyPort = desiredProxyPort;
+      aiBrowserSession.stealth = desiredStealth;
+      aiBrowserSession.open = true;
+      aiBrowserSession.active = true;
+
+      await aiBrowserAttachPage(page, context);
+
+      if (currentUrl && /^https?:\/\//i.test(currentUrl)) {
+        await page.goto(currentUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+        await aiBrowserSyncNavState();
+      }
+
+      return page;
+    } catch (err) {
+      if (context) await context.close().catch(() => {});
+      if (launchedNewBrowser && aiBrowserRuntime.browser) {
         await aiBrowserRuntime.browser.close().catch(() => {});
         aiBrowserRuntime.browser = null;
       }
-      const launchArgs = [
-        "--disable-background-timer-throttling",
-        "--disable-renderer-backgrounding",
-        "--disable-dev-shm-usage",
-        "--ignore-certificate-errors",
-        "--allow-insecure-localhost",
-        "--window-size=1280,800",
-      ];
-      if (process.platform === "linux") launchArgs.push("--no-sandbox");
-
-      aiBrowserRuntime.browser = await pw.chromium.launch({
-        executablePath: detected.executablePath || undefined,
-        headless: true,
-        args: launchArgs,
-      });
-      aiBrowserRuntime.executablePath = detected.executablePath;
-      aiBrowserRuntime.browserLabel = detected.label;
-      aiBrowserSession.browserLabel = detected.label;
+      aiBrowserRuntime.context = null;
+      aiBrowserRuntime.page = null;
+      aiBrowserRuntime.cdp = null;
+      throw err;
     }
-
-    const statePath = aiBrowserStateFile();
-    if (clearSession && statePath) {
-      try { await promises.rm(statePath, { force: true }); } catch {}
-    }
-
-    const contextOptions = {
-      viewport: { width: 1280, height: 800 },
-      ignoreHTTPSErrors: true,
-      acceptDownloads: true,
-    };
-    if (!clearSession && statePath && node_fs.existsSync(statePath)) {
-      contextOptions.storageState = statePath;
-    }
-    if (desiredProxyPort > 0) {
-      contextOptions.proxy = { server: `http://127.0.0.1:${desiredProxyPort}` };
-    }
-
-    const context = await aiBrowserRuntime.browser.newContext(contextOptions);
-    const page = await context.newPage();
-    aiBrowserRuntime.proxyPort = desiredProxyPort;
-    aiBrowserSession.proxyPort = desiredProxyPort;
-    aiBrowserSession.open = true;
-    aiBrowserSession.active = true;
-
-    await aiBrowserAttachPage(page, context);
-
-    if (currentUrl && /^https?:\/\//i.test(currentUrl)) {
-      await page.goto(currentUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
-      await aiBrowserSyncNavState();
-    }
-
-    return page;
   })().finally(() => {
     aiBrowserRuntime.launchPromise = null;
   });
@@ -626,6 +986,15 @@ async function aiBrowserSnapRefs(page, { interactiveOnly = true, selector = "", 
     { interactiveOnly, rootSel: selector || "", limit: capped }
   );
 
+  data.title = aiBrowserStripEmojis(data.title || "");
+  if (Array.isArray(data.nodes)) {
+    for (const node of data.nodes) {
+      if (node && node.name) {
+        node.name = aiBrowserStripEmojis(node.name);
+      }
+    }
+  }
+
   aiBrowserSession.domSummary = (data.nodes || []).map((n) => ({
     id: Number(String(n.ref || "").replace("@e", "")) || 0,
     ref: n.ref,
@@ -702,25 +1071,30 @@ async function aiExecuteBrowserOpen(input = {}, emit) {
   }
   aiBrowserEmitAction("open", targetUrl || "browser", { openPanel: true });
 
-  const page = await aiBrowserEnsureReady({
-    clearSession: Boolean(input.clearSession),
-    bypassProxy: Boolean(input.bypassProxy),
-    emit,
-  });
-
-  if (targetUrl) {
-    await page.goto(targetUrl, {
-      waitUntil: input.waitUntil || "domcontentloaded",
-      timeout: 30000,
+  try {
+    const page = await aiBrowserEnsureReady({
+      clearSession: Boolean(input.clearSession),
+      bypassProxy: Boolean(input.bypassProxy),
+      stealth: typeof input.stealth === "boolean" ? input.stealth : undefined,
+      emit,
     });
-    await page.waitForTimeout(250);
+
+    if (targetUrl) {
+      await page.goto(targetUrl, {
+        waitUntil: input.waitUntil || "domcontentloaded",
+        timeout: 30000,
+      });
+      await page.waitForTimeout(250);
+    }
+    aiBrowserSession.loading = false;
+    await aiBrowserSyncNavState();
+    await aiCaptureLiveScreenshot(page);
+    const snap = await aiBrowserSnapRefs(page);
+    aiBrowserEmitAction("open", aiBrowserSession.url);
+    return aiFormatSnapshotText(snap);
+  } finally {
+    aiBrowserSession.loading = false;
   }
-  aiBrowserSession.loading = false;
-  await aiBrowserSyncNavState();
-  await aiCaptureLiveScreenshot(page);
-  const snap = await aiBrowserSnapRefs(page);
-  aiBrowserEmitAction("open", aiBrowserSession.url);
-  return aiFormatSnapshotText(snap);
 }
 
 async function aiExecuteBrowserNavigate(url, emit, opts = {}) {
@@ -781,10 +1155,12 @@ async function aiExecuteBrowserClick(selector, elementId, text, emit, extra = {}
   const page = aiBrowserRuntime.page;
   try {
     let targetLabel = "";
+    let highlight = null;
     if (Number.isFinite(Number(extra.x)) && Number.isFinite(Number(extra.y))) {
       const x = Number(extra.x);
       const y = Number(extra.y);
       targetLabel = `(${x},${y})`;
+      highlight = aiBrowserClampHighlight({ x: x - 14, y: y - 14, width: 28, height: 28 }, targetLabel, "click");
       await page.mouse.click(x, y, {
         button: extra.button || "left",
         clickCount: Number(extra.clickCount) || 1,
@@ -800,6 +1176,8 @@ async function aiExecuteBrowserClick(selector, elementId, text, emit, extra = {}
         return "Provide ref (e.g. '@e1'), element_id, selector, text, or x/y coordinates to click.";
       }
       targetLabel = target.label;
+      const box = await target.locator.boundingBox().catch(() => null);
+      highlight = aiBrowserClampHighlight(box, targetLabel, "click");
       await target.locator.click({
         timeout: 8000,
         button: extra.button || "left",
@@ -810,7 +1188,7 @@ async function aiExecuteBrowserClick(selector, elementId, text, emit, extra = {}
     await aiBrowserSyncNavState();
     await aiCaptureLiveScreenshot(page);
     const snap = await aiBrowserSnapRefs(page);
-    aiBrowserEmitAction("click", targetLabel);
+    aiBrowserEmitAction("click", targetLabel, highlight ? { highlight } : {});
     return `Clicked ${targetLabel}.\n${aiFormatSnapshotText(snap)}`;
   } catch (error) {
     return `Click failed: ${String(error?.message || error)}`;
@@ -831,8 +1209,11 @@ async function aiExecuteBrowserType(selector, elementId, text, clear = true, sub
       selector,
     });
     let label = "active element";
+    let highlight = null;
     if (target) {
       label = target.label;
+      const box = await target.locator.boundingBox().catch(() => null);
+      highlight = aiBrowserClampHighlight(box, label, "type");
       if (clear) {
         await target.locator.fill(value, { timeout: 8000 });
       } else {
@@ -851,7 +1232,7 @@ async function aiExecuteBrowserType(selector, elementId, text, clear = true, sub
     await aiBrowserSyncNavState();
     await aiCaptureLiveScreenshot(page);
     const snap = await aiBrowserSnapRefs(page);
-    aiBrowserEmitAction("type", label);
+    aiBrowserEmitAction("type", label, highlight ? { highlight } : {});
     return `Typed into ${label}${submit ? " and pressed Enter" : ""}.\n${aiFormatSnapshotText(snap)}`;
   } catch (error) {
     return `Type failed: ${String(error?.message || error)}`;
@@ -885,10 +1266,12 @@ async function aiExecuteBrowserHover(input = {}, emit) {
   const target = aiResolveLocator(aiBrowserRuntime.page, input);
   if (!target) return "Provide ref, selector, or text to hover.";
   try {
+    const box = await target.locator.boundingBox().catch(() => null);
+    const highlight = aiBrowserClampHighlight(box, target.label, "hover");
     await target.locator.hover({ timeout: 8000 });
     await aiBrowserRuntime.page.waitForTimeout(200);
     await aiCaptureLiveScreenshot(aiBrowserRuntime.page);
-    aiBrowserEmitAction("hover", target.label);
+    aiBrowserEmitAction("hover", target.label, highlight ? { highlight } : {});
     return `Hovered over ${target.label}.`;
   } catch (error) {
     return `Hover failed: ${String(error?.message || error)}`;
@@ -1098,14 +1481,28 @@ async function aiExecuteBrowserScreenshot(emit, opts = {}) {
   return `No active Chromium page open yet (current URL: ${aiBrowserSession.url}).`;
 }
 
+async function aiExecuteBrowserExportHar(input = {}, emit) {
+  if (emit) aiBrowserRuntime.emitFn = emit;
+  const har = aiBrowserBuildHarLog(input);
+  aiBrowserEmitAction("export_har", `${har.log.entries.length} entries`);
+  return JSON.stringify(har, null, 2).slice(0, 18000);
+}
+
 async function aiExecuteBrowserClose(emit) {
   if (emit) aiBrowserRuntime.emitFn = emit;
+  if (aiBrowserRuntime.inputCaptureTimer) {
+    clearTimeout(aiBrowserRuntime.inputCaptureTimer);
+    aiBrowserRuntime.inputCaptureTimer = null;
+  }
   await aiBrowserSaveStorageState();
   aiBrowserSession.open = false;
   aiBrowserSession.active = false;
   aiBrowserSession.loading = false;
+  aiBrowserSession.screenshot = "";
+  aiBrowserSession.lastHighlight = null;
   aiBrowserSession.domSummary = [];
   try {
+    await aiBrowserRuntime.cdp?.send("Page.stopScreencast").catch(() => {});
     await aiBrowserRuntime.cdp?.detach().catch(() => {});
     await aiBrowserRuntime.context?.close().catch(() => {});
     await aiBrowserRuntime.browser?.close().catch(() => {});
@@ -1117,22 +1514,39 @@ async function aiExecuteBrowserClose(emit) {
   aiBrowserRuntime.page = null;
   aiBrowserRuntime.browser = null;
   aiBrowserRuntime.consoleLogs = [];
+  aiBrowserRuntime.networkRequests.clear();
+  aiBrowserRuntime.harEntries = [];
+  aiBrowserRuntime.harStartedAt = "";
   aiBrowserEmitAction("close", "browser");
+  aiBrowserRuntime.emitFn = null;
   return "Browser session closed.";
 }
 
-function disposeAiBrowser() {
+async function disposeAiBrowser() {
   if (aiBrowserRuntime.closing) return;
   aiBrowserRuntime.closing = true;
-  try {
-    void aiBrowserRuntime.browser?.close().catch(() => {});
-  } catch {
-    void 0;
+  if (aiBrowserRuntime.inputCaptureTimer) {
+    clearTimeout(aiBrowserRuntime.inputCaptureTimer);
+    aiBrowserRuntime.inputCaptureTimer = null;
   }
-  aiBrowserRuntime.browser = null;
+  if (aiBrowserRuntime.installChild) {
+    try { killProcessTree(aiBrowserRuntime.installChild); } catch {}
+    aiBrowserRuntime.installChild = null;
+  }
+  const cdp = aiBrowserRuntime.cdp;
+  const ctx = aiBrowserRuntime.context;
+  const br = aiBrowserRuntime.browser;
+  aiBrowserRuntime.cdp = null;
   aiBrowserRuntime.context = null;
   aiBrowserRuntime.page = null;
-  aiBrowserRuntime.cdp = null;
+  aiBrowserRuntime.browser = null;
+  aiBrowserRuntime.emitFn = null;
+  aiBrowserSession.screenshot = "";
+  aiBrowserRuntime.networkRequests.clear();
+  try { await cdp?.send("Page.stopScreencast").catch(() => {}); } catch {}
+  try { await cdp?.detach().catch(() => {}); } catch {}
+  try { await ctx?.close().catch(() => {}); } catch {}
+  try { await br?.close().catch(() => {}); } catch {}
 }
 
 function registerAiBrowserHandlers() {
@@ -1187,9 +1601,16 @@ function registerAiBrowserHandlers() {
         const text = String(payload.text || "");
         if (text) await page.keyboard.insertText(text);
       }
-      setTimeout(() => {
-        void aiCaptureLiveScreenshot(page).then(() => aiBrowserEmitFrame(true));
-      }, 60);
+      if (type !== "mousemove") {
+        if (aiBrowserRuntime.inputCaptureTimer) clearTimeout(aiBrowserRuntime.inputCaptureTimer);
+        aiBrowserRuntime.inputCaptureTimer = setTimeout(() => {
+          aiBrowserRuntime.inputCaptureTimer = null;
+          if (!aiBrowserRuntime.closing && !page.isClosed()) {
+            void aiCaptureLiveScreenshot(page).then(() => aiBrowserEmitFrame(false));
+          }
+        }, 80);
+        aiBrowserRuntime.inputCaptureTimer.unref?.();
+      }
       return { ok: true };
     } catch (error) {
       return { ok: false, error: String(error?.message || error) };
@@ -1207,8 +1628,43 @@ function registerAiBrowserHandlers() {
         return { ok: true, result: res, session: aiBrowserSession };
       }
       if (action === "open") {
-        const res = await aiExecuteBrowserOpen({ url: payload.url }, emit);
+        const res = await aiExecuteBrowserOpen({
+          url: payload.url,
+          stealth: typeof payload.stealth === "boolean" ? payload.stealth : undefined,
+        }, emit);
         return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (action === "export_har") {
+        const har = aiBrowserBuildHarLog(payload);
+        const safeHost = (() => {
+          try {
+            return (new URL(aiBrowserSession.url).hostname || "session").replace(/[^a-z0-9.-]/gi, "_");
+          } catch {
+            return "session";
+          }
+        })();
+        return {
+          ok: true,
+          har,
+          entryCount: har.log.entries.length,
+          suggestedFilename: `wide-browser-${safeHost}-${Date.now()}.har`,
+          session: aiBrowserSession,
+        };
+      }
+      if (action === "toggle_stealth") {
+        aiBrowserRuntime.stealth = !aiBrowserRuntime.stealth;
+        aiBrowserSession.stealth = aiBrowserRuntime.stealth;
+        if (aiBrowserRuntime.page && !aiBrowserRuntime.page.isClosed()) {
+          await aiBrowserEnsureReady({
+            bypassProxy: aiBrowserRuntime.bypassProxy,
+            stealth: aiBrowserRuntime.stealth,
+            emit,
+          });
+          await aiBrowserSyncNavState();
+          await aiCaptureLiveScreenshot(aiBrowserRuntime.page);
+          aiBrowserEmitFrame(true);
+        }
+        return { ok: true, session: aiBrowserSession };
       }
       const page = aiBrowserRuntime.page;
       if (!page || page.isClosed()) return { ok: false, error: "No browser page open." };
@@ -1217,7 +1673,11 @@ function registerAiBrowserHandlers() {
       else if (action === "reload") await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
       else if (action === "toggle_proxy") {
         aiBrowserRuntime.bypassProxy = !aiBrowserRuntime.bypassProxy;
-        await aiBrowserEnsureReady({ bypassProxy: aiBrowserRuntime.bypassProxy, emit });
+        await aiBrowserEnsureReady({
+          bypassProxy: aiBrowserRuntime.bypassProxy,
+          stealth: aiBrowserRuntime.stealth,
+          emit,
+        });
       }
       await aiBrowserSyncNavState();
       await aiCaptureLiveScreenshot(aiBrowserRuntime.page || page);

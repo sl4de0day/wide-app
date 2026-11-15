@@ -1951,4 +1951,13 @@ export const ES: Record<string, string> = {
   "Update & Restart": "Actualizar y reiniciar",
   "Wide App checks for updates on startup and installs them automatically from GitHub.": "Wide App busca actualizaciones al iniciar y las instala automáticamente desde GitHub.",
   "Wide IDE opened": "Wide IDE abierto",
+  "Clear History": "Borrar historial",
+  "Copied Mermaid ERD diagram.": "Diagrama ERD de Mermaid copiado.",
+  "Copy Mermaid": "Copiar Mermaid",
+  "Could not copy Mermaid diagram.": "No se pudo copiar el diagrama de Mermaid.",
+  "A crash was detected from the previous session": "Se detectó un fallo de la sesión anterior",
+  "It appears {app} encountered an unexpected error and closed. You can help improve stability by submitting this anonymous report.": "Parece que {app} encontró un error inesperado y se cerró. Puedes ayudar a mejorar la estabilidad enviando este informe anónimo.",
+  "Type: {kind}": "Tipo: {kind}",
+  "Sending...": "Enviando...",
+  "Send Report": "Enviar informe",
 };

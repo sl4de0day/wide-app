@@ -55,12 +55,47 @@ function registerSecScanHandlers() {
   const SANITISER_RE =
     /\b(?:sanitiz|sanitis|escape|encodeURI|encodeURIComponent|DOMPurify|purify|htmlspecialchars|htmlentities|escapeHtml|escapeshellarg|shlex\.quote|Number|parseInt|parseFloat|basename|realpath|allowlist|whitelist|validator|bindparam|bind_param|prepare|CGI\.escape|htmlEscape|Integer\.parseInt|Integer\.valueOf|toInt|to_i|intval|is_numeric)/i;
 
+  const SEC_IDENT_RE = /\b[A-Za-z_]\w*\b/g;
+  const SEC_CONFIG_CACHE_MAX = 24;
+  const SEC_OSV_CACHE_MAX = 24;
+  const SEC_CACHE_ROOT_MAX = 16;
+  const SEC_CACHE_FILE_MAX = 5000;
+  const SEC_HTTP_TIMEOUT_MS = 15000;
+  const SEC_HTTP_MAX_BYTES = 10 * 1024 * 1024;
+  const SEC_HTTP_USER_AGENT = process.env.WIDE_USER_AGENT || "Wide-Security-Scanner/1.9";
+
+  function hasTaintedIdent(text, tainted) {
+    if (!tainted || !tainted.size || !text) return false;
+    SEC_IDENT_RE.lastIndex = 0;
+    let m;
+    while ((m = SEC_IDENT_RE.exec(text))) {
+      if (tainted.has(m[0])) return true;
+    }
+    return false;
+  }
+
+  function secCacheGetLru(map, key) {
+    if (!map.has(key)) return undefined;
+    const val = map.get(key);
+    map.delete(key);
+    map.set(key, val);
+    return val;
+  }
+
+  function secCacheSetLru(map, key, val, limit) {
+    if (map.has(key)) map.delete(key);
+    map.set(key, val);
+    while (map.size > limit) {
+      const oldest = map.keys().next().value;
+      map.delete(oldest);
+    }
+  }
+
   const isSecComment = (line) => {
     const t = line.trimStart();
     return t.startsWith("//") || t.startsWith("#") || t.startsWith("*") || t.startsWith("/*") ||
       t.startsWith("--") || t.startsWith("%") || t.startsWith(";");
   };
-  const secEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   const SEC_TEST_PATH =
     /(^|[\\/])(?:tests?|specs?|__tests__|__mocks__|fixtures?|testdata|e2e|cypress|\.storybook)([\\/]|$)|\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.(?:go|py|rb)$|(?:Test|Tests|Spec)\.(?:java|cs|kt|scala)$/i;
@@ -103,23 +138,30 @@ function registerSecScanHandlers() {
   }
 
   function secGlobToRe(pattern) {
+    const clean = String(pattern || "")
+      .replace(/\\/g, "/")
+      .replace(/\*{3,}/g, "**")
+      .replace(/(?:\*\*\/){2,}/g, "**/");
     let out = "";
-    for (let i = 0; i < pattern.length; i += 1) {
-      const c = pattern[i];
+    for (let i = 0; i < clean.length; i += 1) {
+      const c = clean[i];
       if (c === "*") {
-        if (pattern[i + 1] === "*") {
-          out += ".*";
-          i += 1;
-          if (pattern[i + 1] === "/") i += 1;
+        if (clean[i + 1] === "*") {
+          if (clean[i + 2] === "/") {
+            out += "(?:[^/]*/)*";
+            i += 2;
+          } else {
+            out += ".*";
+            i += 1;
+          }
         } else {
-          out += "[^/\\\\]*";
+          out += "[^/]*";
         }
-      } else if (c === "?") out += ".";
-      else if (c === "/") out += "[/\\\\]";
+      } else if (c === "?") out += "[^/]";
       else out += c.replace(/[.+^${}()|[\]\\]/, "\\$&");
     }
     try {
-      return new RegExp("(^|[/\\\\])" + out + "$", "i");
+      return new RegExp("(^|/)" + out + "$", "i");
     } catch {
       return null;
     }
@@ -144,6 +186,38 @@ function registerSecScanHandlers() {
   const SEC_REMOTE_CHECKSUMS_URL = "https://raw.githubusercontent.com/sl4de0day/wide-rules/main/dist/SHA256SUMS";
   let secRemoteOsv = null;
 
+  const SEC_LANG_ALIAS = {
+    ...SEC_LANG,
+    javascript: "js",
+    typescript: "js",
+    python: "py",
+    ruby: "rb",
+    csharp: "cs",
+    "c#": "cs",
+    golang: "go",
+    rust: "rust",
+    elixir: "elixir",
+    kotlin: "kotlin",
+    scala: "scala",
+    erlang: "erlang",
+    shell: "sh",
+    bash: "sh",
+    json: "json",
+  };
+
+  function normalizeCustomRuleLangs(rawLangs) {
+    if (!Array.isArray(rawLangs) || rawLangs.length === 0) return EVERY_LANG;
+    const mapped = [];
+    for (const v of rawLangs) {
+      if (typeof v !== "string") continue;
+      const lower = v.trim().toLowerCase();
+      if (!lower) continue;
+      if (lower === "all" || lower === "*") return EVERY_LANG;
+      mapped.push(SEC_LANG_ALIAS[lower] || lower);
+    }
+    return mapped.length ? [...new Set(mapped)] : EVERY_LANG;
+  }
+
   function parseCustomRules(list) {
     if (!list) return [];
     if (!Array.isArray(list)) {
@@ -158,9 +232,10 @@ function registerSecScanHandlers() {
       if (!raw || typeof raw !== "object" || typeof raw.id !== "string") continue;
       const pat = raw.pattern || raw.text || raw.match;
       if (typeof pat !== "string" || !pat) continue;
+      const safeFlags = typeof raw.flags === "string" ? raw.flags.replace(/[^imsu]/g, "") : "";
       let re;
       try {
-        re = new RegExp(pat, typeof raw.flags === "string" ? raw.flags.replace(/[^gimsuy]/g, "") : "");
+        re = new RegExp(pat, safeFlags);
       } catch {
         continue;
       }
@@ -168,24 +243,35 @@ function registerSecScanHandlers() {
       let notMatch = null;
       if (typeof rawNotMatch === "string" && rawNotMatch) {
         try {
-          notMatch = new RegExp(rawNotMatch, typeof raw.flags === "string" ? raw.flags.replace(/[^gimsuy]/g, "") : "");
+          notMatch = new RegExp(rawNotMatch, safeFlags);
         } catch {
           notMatch = null;
         }
       }
-      const rawLangs = raw.languages || raw.langs;
-      const langs = Array.isArray(rawLangs) && rawLangs.length
-        ? rawLangs.filter((v) => typeof v === "string")
-        : EVERY_LANG;
+      const rawNotMatchUnless = raw["not-match-unless"] || raw.notMatchUnless;
+      let notMatchUnless = null;
+      if (typeof rawNotMatchUnless === "string" && rawNotMatchUnless) {
+        try {
+          notMatchUnless = new RegExp(rawNotMatchUnless, safeFlags);
+        } catch {
+          notMatchUnless = null;
+        }
+      }
+      const id = raw.id.startsWith("wide/") || raw.id.startsWith("custom/") ? raw.id : `custom/${raw.id}`;
+      if (!notMatchUnless && notMatch && (id.startsWith("idor-") || id.startsWith("wide/idor-"))) {
+        notMatchUnless = SEC_OWNER_FROM_REQUEST;
+      }
+      const langs = normalizeCustomRuleLangs(raw.languages || raw.langs);
       let sev = String(raw.severity || "warning").toLowerCase();
       if (sev === "critical" || sev === "high") sev = "error";
       else if (sev === "medium") sev = "warning";
       else if (sev === "low") sev = "info";
       out.push({
-        id: raw.id.startsWith("wide/") || raw.id.startsWith("custom/") ? raw.id : `custom/${raw.id}`,
+        id,
         langs,
         re,
         ...(notMatch ? { notMatch } : {}),
+        ...(notMatchUnless ? { notMatchUnless } : {}),
         severity: ["info", "warning", "error"].includes(sev) ? sev : "warning",
         confidence: ["low", "medium", "high"].includes(raw.confidence) ? raw.confidence : "medium",
         cwe: typeof raw.cwe === "string" ? raw.cwe : "",
@@ -196,18 +282,63 @@ function registerSecScanHandlers() {
     return out;
   }
 
-  function secHttpGetText(url) {
+  function secHttpGetText(url, redirectsLeft = 3) {
     return new Promise((resolve, reject) => {
-      node_https.get(url, { headers: { "User-Agent": "Wide-App/0.4141126" } }, (res) => {
-        if (res.statusCode !== 200) {
-          res.resume();
-          reject(new Error(`HTTP ${res.statusCode} from ${url}`));
-          return;
+      let targetUrl;
+      try {
+        targetUrl = new URL(url);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      const transport = targetUrl.protocol === "http:" ? node_http : node_https;
+      let settled = false;
+      const done = (err, text) => {
+        if (settled) return;
+        settled = true;
+        if (err) reject(err);
+        else resolve(text);
+      };
+      const req = transport.get(
+        targetUrl,
+        { headers: { "User-Agent": SEC_HTTP_USER_AGENT } },
+        (res) => {
+          const code = res.statusCode || 0;
+          const loc = res.headers.location;
+          if (loc && (code === 301 || code === 302 || code === 307 || code === 308) && redirectsLeft > 0) {
+            res.resume();
+            try {
+              const nextUrl = new URL(loc, targetUrl).toString();
+              secHttpGetText(nextUrl, redirectsLeft - 1).then((t) => done(null, t), (e) => done(e));
+            } catch (e) {
+              done(e);
+            }
+            return;
+          }
+          if (code !== 200) {
+            res.resume();
+            done(new Error(`HTTP ${code} from ${url}`));
+            return;
+          }
+          const chunks = [];
+          let total = 0;
+          res.on("data", (chunk) => {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            total += buf.length;
+            if (total > SEC_HTTP_MAX_BYTES) {
+              req.destroy(new Error(`Response exceeded ${SEC_HTTP_MAX_BYTES} bytes from ${url}`));
+              return;
+            }
+            chunks.push(buf);
+          });
+          res.on("end", () => done(null, Buffer.concat(chunks).toString("utf8")));
+          res.on("error", (err) => done(err));
         }
-        let data = "";
-        res.on("data", (chunk) => { data += chunk; });
-        res.on("end", () => resolve(data));
-      }).on("error", reject);
+      );
+      req.setTimeout(SEC_HTTP_TIMEOUT_MS, () => {
+        req.destroy(new Error(`Timeout after ${SEC_HTTP_TIMEOUT_MS}ms fetching ${url}`));
+      });
+      req.on("error", (err) => done(err));
     });
   }
 
@@ -232,42 +363,35 @@ function registerSecScanHandlers() {
 
   async function updateRulesFromRemote() {
     await promises.mkdir(SEC_DEFAULT_CACHE_DIR, { recursive: true });
-    let checksums = new Map();
-    try {
-      checksums = parseSecChecksums(await secHttpGetText(SEC_REMOTE_CHECKSUMS_URL));
-    } catch {
-      checksums = new Map();
+    const checksums = parseSecChecksums(await secHttpGetText(SEC_REMOTE_CHECKSUMS_URL));
+    const expectedRulesSha = checksums.get("rules.json");
+    if (!expectedRulesSha) {
+      throw new Error("Missing rules.json checksum in SHA256SUMS");
     }
 
     const rulesRaw = await secHttpGetText(SEC_REMOTE_RULES_URL);
-    const expectedRulesSha = checksums.get("rules.json");
-    if (expectedRulesSha) {
-      const actualSha = node_crypto.createHash("sha256").update(rulesRaw).digest("hex");
-      if (actualSha !== expectedRulesSha) {
-        throw new Error(`SHA-256 mismatch for rules.json`);
-      }
+    const actualSha = node_crypto.createHash("sha256").update(rulesRaw).digest("hex");
+    if (actualSha !== expectedRulesSha) {
+      throw new Error("SHA-256 mismatch for rules.json");
     }
     const parsed = JSON.parse(rulesRaw);
     await writeFileAtomic(SEC_DEFAULT_CACHE_FILE, JSON.stringify(parsed, null, 2), "utf8");
     const count = Array.isArray(parsed) ? parsed.length : Array.isArray(parsed.rules) ? parsed.rules.length : 0;
 
     let osvCount = 0;
-    try {
-      const osvRaw = await secHttpGetText(SEC_REMOTE_OSV_URL);
-      const expectedOsvSha = checksums.get("osv-bundle.json");
-      if (expectedOsvSha) {
-        const actualOsvSha = node_crypto.createHash("sha256").update(osvRaw).digest("hex");
-        if (actualOsvSha !== expectedOsvSha) {
-          throw new Error(`SHA-256 mismatch for osv-bundle.json`);
-        }
-      }
-      const osvParsed = JSON.parse(osvRaw);
-      await writeFileAtomic(SEC_DEFAULT_OSV_FILE, JSON.stringify(osvParsed, null, 2), "utf8");
-      secRemoteOsv = parseOsvDoc(osvParsed);
-      osvCount = Number(osvParsed?.stats?.total || 0);
-    } catch (err) {
-      if (String(err && err.message ? err.message : "").includes("SHA-256 mismatch")) throw err;
+    const expectedOsvSha = checksums.get("osv-bundle.json");
+    if (!expectedOsvSha) {
+      throw new Error("Missing osv-bundle.json checksum in SHA256SUMS");
     }
+    const osvRaw = await secHttpGetText(SEC_REMOTE_OSV_URL);
+    const actualOsvSha = node_crypto.createHash("sha256").update(osvRaw).digest("hex");
+    if (actualOsvSha !== expectedOsvSha) {
+      throw new Error("SHA-256 mismatch for osv-bundle.json");
+    }
+    const osvParsed = JSON.parse(osvRaw);
+    await writeFileAtomic(SEC_DEFAULT_OSV_FILE, JSON.stringify(osvParsed, null, 2), "utf8");
+    secRemoteOsv = parseOsvDoc(osvParsed);
+    osvCount = Number(osvParsed?.stats?.total || 0);
 
     await writeFileAtomic(
       SEC_DEFAULT_META_FILE,
@@ -328,7 +452,7 @@ function registerSecScanHandlers() {
     }
 
     const compositeStamp = `${stamp}:${wsRulesStamp}:${cacheStamp}`;
-    const cached = SEC_CONFIG_CACHE.get(root);
+    const cached = secCacheGetLru(SEC_CONFIG_CACHE, root);
     if (cached && cached.stamp === compositeStamp) return cached.config;
 
     let parsed = {};
@@ -377,7 +501,7 @@ function registerSecScanHandlers() {
       minConfidence: SEC_RANK[parsed.minConfidence] === undefined ? "low" : parsed.minConfidence,
       customRules: combinedCustom,
     };
-    SEC_CONFIG_CACHE.set(root, { stamp: compositeStamp, config });
+    secCacheSetLru(SEC_CONFIG_CACHE, root, { stamp: compositeStamp, config }, SEC_CONFIG_CACHE_MAX);
     return config;
   }
 
@@ -443,20 +567,10 @@ function registerSecScanHandlers() {
 
   function collectTainted(lines, seed) {
     const tainted = new Set(seed || []);
-
-    let cachedRe = null;
-    let cachedSize = -1;
     const isSrc = (rhs) => {
       if (SANITISER_RE.test(rhs)) return false;
       if (SOURCE_RE.test(rhs)) return true;
-      if (tainted.size) {
-        if (cachedSize !== tainted.size) {
-          cachedRe = new RegExp("\\b(?:" + [...tainted].map(secEsc).join("|") + ")\\b");
-          cachedSize = tainted.size;
-        }
-        if (cachedRe.test(rhs)) return true;
-      }
-      return false;
+      return hasTaintedIdent(rhs, tainted);
     };
     const add = (name) => {
       const n = String(name).replace(/^[$@]/, "");
@@ -2882,6 +2996,107 @@ function registerSecScanHandlers() {
     { id: "iac-tf-public-acl", langs: ["terraform"], severity: "warning", cwe: "CWE-732",
       re: /\bacl\s*=\s*"public-read(?:-write)?"/,
       message: "A public-read/-write ACL exposes the object store's contents (and, with -write, lets anyone modify them) to the public. Keep the bucket private and grant access explicitly." },
+    { id: "auth-bypass-hardcoded-backdoor", langs: ["js", "html", "php", "py", "java", "go", "rb", "cs", "kotlin"], severity: "error", cwe: "CWE-798",
+      re: /\b(?:password|passwd|pwd|token|otp|api[_-]?key|apikey|secret|pin|access[_-]?code|master[_-]?key|auth[_-]?key)\w*\s*===?\s*["'`](?:admin|administrator|backdoor|master|bypass|letmein|password|passw0rd|123456|000000|111111|test123|guest|root|default|changeme)["'`]/,
+      notMatch: /^\s*(?:\/\/|\*|\/\*|#)/,
+      message: "Hardcoded backdoor or default credential comparison detected in authentication logic." },
+    { id: "blob-worker-code", langs: ["js", "html"], severity: "error", cwe: "CWE-95",
+      re: /new\s+(?:Worker|SharedWorker)\s*\([^)]*(?:createObjectURL|blob:|new\s+Blob)/,
+      message: "Web Worker instantiated from a Blob or dynamic object URL; tainted strings execute directly inside worker script context." },
+    { id: "broadcastchannel-secrets", langs: ["js", "html"], severity: "info", confidence: "low", cwe: "CWE-668",
+      re: /new\s+BroadcastChannel\s*\(/,
+      message: "BroadcastChannel shares messages across same-origin tabs/workers; avoid transmitting raw secrets or session tokens." },
+    { id: "contextual-fragment", langs: ["js", "html"], severity: "warning", cwe: "CWE-79",
+      re: /createContextualFragment\s*\(\s*[A-Za-z_$`]/,
+      message: "Range.createContextualFragment parses dynamic HTML without sanitization, enabling DOM XSS." },
+    { id: "css-injection", langs: ["js", "html"], severity: "warning", cwe: "CWE-74",
+      re: /\bstyle\w*\.(?:textContent|innerHTML)\s*\+?=\s*[A-Za-z_$`]|\.insertRule\s*\(\s*[A-Za-z_$`]/,
+      message: "Dynamic CSS rule or stylesheet injection can leak attributes via CSS selectors or abuse legacy expressions." },
+    { id: "cwe347-jwt-alg-confusion-mix", langs: ["js"], severity: "error", cwe: "CWE-347",
+      re: /algorithms\s*:\s*\[[^\]]*(?:HS\d{3}[^\]]*(?:RS|ES|PS)\d{3}|(?:RS|ES|PS)\d{3}[^\]]*HS\d{3})/,
+      message: "JWT verification mixes symmetric HMAC algorithms with asymmetric RSA/EC algorithms, allowing key-confusion token forgery." },
+    { id: "cwe760-hardcoded-kdf-salt", langs: ["js"], severity: "warning", cwe: "CWE-760",
+      re: /(?:pbkdf2|scrypt)(?:Sync)?\s*\(\s*[^,]+,\s*['"]/,
+      message: "Hardcoded static salt passed to KDF (pbkdf2/scrypt); use a unique random salt per derived secret." },
+    { id: "cwe780-rsa-no-oaep-padding", langs: ["js", "py", "java", "go", "cs"], severity: "warning", cwe: "CWE-780",
+      re: /padding\s*[:=]\s*[\w.]*RSA_PKCS1_PADDING\b/,
+      message: "RSA encryption uses legacy PKCS#1 v1.5 padding instead of RSA-OAEP, risking Bleichenbacher padding-oracle attacks." },
+    { id: "cwe89-drizzle-sql-raw", langs: ["js"], severity: "error", cwe: "CWE-89",
+      re: /sql\.raw\s*\(\s*(?:`[^`]{0,300}\$\{|["'][^"']{0,300}["']\s*\+|[A-Za-z_$][A-Za-z0-9_$]{0,60}\s*(?:,|\)))/,
+      notMatch: /^\s*(?:\/\/|\/\*|\*)/,
+      message: "Drizzle sql.raw() builds raw SQL using interpolated or dynamic input — SQL injection." },
+    { id: "cwe89-prisma-raw-unsafe", langs: ["js"], severity: "error", cwe: "CWE-89",
+      re: /\$(?:queryRawUnsafe|executeRawUnsafe)\s*\(/,
+      message: "Prisma unsafe raw SQL method ($queryRawUnsafe/$executeRawUnsafe) used; prefer tagged-template $queryRaw." },
+    { id: "cwe89-sequelize-literal", langs: ["js"], severity: "error", cwe: "CWE-89",
+      re: /[Ss]equelize\.literal\s*\(\s*(?:`[^`]{0,300}\$\{|["'][^"']{0,300}["']\s*\+|[A-Za-z_$][A-Za-z0-9_$]{0,60}\s*(?:,|\)))/,
+      notMatch: /^\s*(?:\/\/|\/\*|\*)/,
+      message: "Sequelize.literal() embeds unescaped raw SQL fragments from dynamic strings — SQL injection." },
+    { id: "dom-clobbering", langs: ["js", "html"], severity: "warning", cwe: "CWE-79",
+      re: /\b(?:document|window|globalThis|self|top|parent)\[\s*[A-Za-z_$][\w$]*\s*\]/,
+      notMatch: /Object\.keys|hasOwnProperty|\bin\s+(?:document|window)/,
+      message: "Dynamic lookup on window/document can be poisoned via named HTML elements (DOM clobbering)." },
+    { id: "dynamic-script-element", langs: ["js", "html"], severity: "info", confidence: "low", cwe: "CWE-829",
+      re: /createElement\s*\(\s*['"`]script['"`]/,
+      message: "Dynamic <script> element creation; ensure src URLs come from a strict same-origin or trusted allowlist and use SRI." },
+    { id: "form-api-clobbering", langs: ["js", "html"], severity: "info", confidence: "low", cwe: "CWE-471",
+      re: /\b\w*[Ff]orm\.(?:submit|elements|action|reset|method|acceptCharset|enctype)\b/,
+      message: "Form property access may be shadowed by child <input name=...> elements (DOM clobbering)." },
+    { id: "hmac-public-key", langs: ["js"], severity: "error", cwe: "CWE-347",
+      re: /createHmac\s*\([^,]+,\s*\w*(?:public|pubkey|cert)\w*/i,
+      message: "Public key or certificate passed as HMAC secret; attackers know public keys and can forge MAC tags." },
+    { id: "importmap-runtime", langs: ["js", "html"], severity: "warning", cwe: "CWE-829",
+      re: /['"`]importmap['"`]/,
+      message: "Runtime import map modifies module resolution specifiers; ensure contents are static and uninfluenced by input." },
+    { id: "jwt-long-lived-token", langs: ["js", "html"], severity: "warning", cwe: "CWE-613",
+      re: /\bexpiresIn\s*:\s*['"`]?(?:\d+\s*(?:y|years?)|[1-9]\d{2,}\s*d\b|\d{8,})/,
+      notMatch: /^\s*(?:\/\/|\*|\/\*)/,
+      message: "JWT configured with excessively long expiration window; prefer short-lived access tokens with refresh rotation." },
+    { id: "jwt-missing-expiry", langs: ["js", "html"], severity: "warning", confidence: "medium", cwe: "CWE-613",
+      re: /\bjwt\.sign\s*\(/,
+      notMatch: /expiresIn|notBefore|\bexp\b|^\s*(?:\/\/|\*|\/\*)/,
+      message: "JWT signed without an explicit expiresIn/exp lifetime claim; leaked tokens never expire." },
+    { id: "mutation-xss", langs: ["js", "html"], severity: "warning", cwe: "CWE-79",
+      re: /querySelectorAll\s*\(\s*['"`][^'"`]*(?:\bsvg\b|\bmath\b|annotation-xml|foreignObject)/,
+      message: "HTML parsing or cleanup across SVG/MathML namespaces risks mutation XSS (mXSS) on re-serialization." },
+    { id: "pbkdf2-iterations-webcrypto", langs: ["js", "html"], severity: "warning", cwe: "CWE-916",
+      re: /\biterations\s*:\s*(?:[1-9]\d{0,4}|[1-5]\d{5})\b/,
+      message: "Low KDF iteration count configured; PBKDF2-SHA256 should use at least 600,000 iterations." },
+    { id: "proto-guard-incomplete", langs: ["js", "html"], severity: "warning", cwe: "CWE-1321",
+      re: /===?\s*['"]__proto__['"]/,
+      notMatch: /constructor|prototype/,
+      message: "Prototype-pollution check blocks __proto__ without checking constructor and prototype keys." },
+    { id: "prototype-pollution-merge", langs: ["js", "html"], severity: "warning", cwe: "CWE-1321",
+      re: /\b(\w+)\[\s*([A-Za-z_$][\w$]*)\s*\]\s*=\s*\b\w+\[\s*\2\s*\]/,
+      notMatch: /\[\s*(?:i|j|k|n|m|idx|index|row|col|x|y)\s*\]|__proto__|hasOwnProperty|Object\.freeze/,
+      message: "Dynamic bracket copy between objects without key validation risks prototype pollution." },
+    { id: "regex-html-sanitizer", langs: ["js", "html"], severity: "warning", cwe: "CWE-184",
+      re: /\/[^\n]*(?:<script|javascript:)[^\n]*\/[gimsuy]*/,
+      message: "Regex-based HTML/URL sanitization is easily bypassed by encoding, malformed tags, or case tricks; use a parser-based sanitizer." },
+    { id: "regex-origin-anchor", langs: ["js", "html"], severity: "error", cwe: "CWE-183",
+      re: /\/\^?https?\??:\\?\/\\?\/[^\n/]*(?:\.\*|\.\+)/,
+      message: "Weak regex origin check without strict host boundary or trailing end anchor allows subdomain/suffix spoofing." },
+    { id: "secret-in-response", langs: ["js", "html"], severity: "error", cwe: "CWE-200",
+      re: /(?:res\.(?:json|send|end|write)|return)\b[^;\n]*\b(?:SECRET|SIGNATURE|signingKey|privateKey|masterKey|secretKey|apiSecret|SECRET_KEY|SECRET_SIGNATURE)\b/,
+      message: "Sensitive server key or secret material appears to be returned directly in a response or handler return value." },
+    { id: "shared-web-lock-mutation", langs: ["js", "html"], severity: "info", confidence: "low", cwe: "CWE-362",
+      re: /lock[^;\n]*mode\s*:\s*['"]shared['"]|mode\s*:\s*['"]shared['"][^;\n]*lock/,
+      message: "Web Locks API configured with shared mode; shared locks allow concurrent writers and race conditions on shared state." },
+    { id: "ssrf-localhost-only", langs: ["js", "html"], severity: "warning", cwe: "CWE-918",
+      re: /\b(?:host(?:name)?|url|target|ip)\b[^;\n]*(?:===|==|!==|!=|includes|indexOf|startsWith)[^;\n]*['"](?:127\.0\.0\.1|localhost)['"]/,
+      message: "SSRF guard only rejects literal localhost/127.0.0.1 while missing IPv6 (::1), IPv4-mapped forms, 0.0.0.0, cloud metadata, and DNS rebinding." },
+    { id: "sw-cache-poisoning", langs: ["js", "html"], severity: "warning", cwe: "CWE-345",
+      re: /\.put\s*\(\s*[^,]+,\s*new\s+Response\b/,
+      message: "Service Worker cache stores a dynamically constructed Response without validating source origin or Content-Type." },
+    { id: "token-in-url-read", langs: ["js", "html"], severity: "warning", cwe: "CWE-598",
+      re: /\.get\s*\(\s*['"](?:auth[_-]?token|access[_-]?token|id[_-]?token|jwt|password|secret|api[_-]?key|token)['"]|req\.query\.(?:auth[_-]?token|access[_-]?token|token|jwt|password|secret|api[_-]?key)\b/,
+      message: "Bearer token or credential read from URL query parameters; URLs leak via Referer headers, browser history, and access logs." },
+    { id: "vue-svelte-html", langs: ["js", "html"], severity: "warning", cwe: "CWE-79",
+      re: /\bv-html\s*=|\{@html\s/,
+      message: "Unescaped HTML directive (Vue v-html or Svelte {@html}) renders raw markup and triggers XSS when fed untrusted data." },
+    { id: "ws-connection-auth", langs: ["js", "html"], severity: "info", confidence: "low", cwe: "CWE-306",
+      re: /\.on\s*\(\s*['"`]connection['"`]/,
+      message: "WebSocket connection handler; verify authentication and Origin validation occur during upgrade or before processing messages." },
   ];
 
   function splitArgs(s) {
@@ -2935,8 +3150,12 @@ function registerSecScanHandlers() {
   }
 
   function secRuleSuppressed(rule, line) {
-    if (!rule.notMatch || !rule.notMatch.test(line)) return false;
-    return !(rule.notMatchUnless && rule.notMatchUnless.test(line));
+    if (!rule.notMatch) return false;
+    rule.notMatch.lastIndex = 0;
+    if (!rule.notMatch.test(line)) return false;
+    if (!rule.notMatchUnless) return true;
+    rule.notMatchUnless.lastIndex = 0;
+    return !rule.notMatchUnless.test(line);
   }
 
   const SEC_HIGH_ENTROPY = /^[A-Za-z0-9+/=_-]{20,}$/;
@@ -2957,16 +3176,16 @@ function registerSecScanHandlers() {
     return distinct >= 8;
   }
 
-  async function scanContent(file, content, lang, config, sup) {
+  async function scanContent(file, content, lang, config, sup, pre) {
     scoreSecRules();
     const settings = config || SEC_DEFAULT_CONFIG;
     const floor = SEC_RANK[settings.minConfidence] ?? 0;
     const out = [];
-    const lines = content.split("\n");
+    const lines = pre && pre.lines ? pre.lines : content.split("\n");
     const suppressions = sup || secSuppressions(lines);
     if (suppressions.whole && suppressions.whole.has("*")) return out;
-    const tainted = collectTainted(lines);
-    const nameRe = tainted.size ? new RegExp("\\b(?:" + [...tainted].map(secEsc).join("|") + ")\\b") : null;
+    const tainted = pre && pre.tainted ? pre.tainted : collectTainted(lines);
+    const hasTaint = tainted.size > 0;
     const osFile = node_path.normalize(file);
     const emitted = new Set();
     const emit = (n, col, rule) => {
@@ -2991,7 +3210,6 @@ function registerSecScanHandlers() {
       });
     };
     for (let i = 0; i < lines.length; i += 1) {
-
       if (i > 0 && i % SEC_YIELD_LINES === 0) await new Promise((r) => setImmediate(r));
       const line = lines[i];
       if (line.length > SEC_MAX_LINE) continue;
@@ -3011,13 +3229,13 @@ function registerSecScanHandlers() {
         if (!m || secRuleSuppressed(rule, line)) continue;
         emit(i + 1, m.index, rule);
       }
-      if (nameRe) {
+      if (hasTaint) {
         for (const sink of TAINT_SINKS) {
           sink.re.lastIndex = 0;
           const m = sink.re.exec(line);
           if (!m) continue;
           const win = (line + " " + (lines[i + 1] || "") + " " + (lines[i + 2] || "")).replace(sink.re, " ");
-          if (nameRe.test(win)) {
+          if (hasTaintedIdent(win, tainted)) {
             emit(i + 1, m.index, {
               id: sink.id,
               cwe: sink.cwe,
@@ -3050,12 +3268,12 @@ function registerSecScanHandlers() {
         if (!m || secRuleSuppressed(rule, text)) continue;
         emit(span.start + 1, 0, rule);
       }
-      if (nameRe) {
+      if (hasTaint) {
         for (const sink of TAINT_SINKS) {
           sink.re.lastIndex = 0;
           const m = sink.re.exec(text);
           if (!m) continue;
-          if (nameRe.test(text.replace(sink.re, " "))) {
+          if (hasTaintedIdent(text.replace(sink.re, " "), tainted)) {
             emit(span.start + 1, 0, {
               id: sink.id,
               cwe: sink.cwe,
@@ -3143,7 +3361,7 @@ function registerSecScanHandlers() {
       const seed = [...slots[s]];
       if (!seed.length) continue;
       const tainted = collectTainted(bodyLines, seed);
-      const nameRe = new RegExp("\\b(?:" + [...tainted].map(secEsc).join("|") + ")\\b");
+      if (!tainted.size) continue;
       for (let i = 0; i < bodyLines.length; i += 1) {
         const line = bodyLines[i];
         if (line.length > SEC_MAX_LINE) continue;
@@ -3154,7 +3372,7 @@ function registerSecScanHandlers() {
           const mm = sink.re.exec(line);
           if (!mm) continue;
           const win = (line + " " + (bodyLines[i + 1] || "") + " " + (bodyLines[i + 2] || "")).replace(sink.re, " ");
-          if (nameRe.test(win)) { result.push({ slot: s, cwe: sink.cwe, message: sink.message, bodyLine: i }); hit = true; break; }
+          if (hasTaintedIdent(win, tainted)) { result.push({ slot: s, cwe: sink.cwe, message: sink.message, bodyLine: i }); hit = true; break; }
         }
         if (hit) break;
       }
@@ -3162,9 +3380,9 @@ function registerSecScanHandlers() {
     return result;
   }
 
-  function fileSummaries(content, lang) {
-    const lines = content.split("\n");
-    const defs = functionDefs(content, lang);
+  function fileSummaries(content, lang, pre) {
+    const lines = pre && pre.lines ? pre.lines : content.split("\n");
+    const defs = pre && pre.defs ? pre.defs : functionDefs(content, lang);
     const summaries = [];
     for (let i = 0; i < defs.length; i += 1) {
       const sinks = sinkParamsOf(defBody(lines, defs, i), defs[i].slots);
@@ -3173,10 +3391,9 @@ function registerSecScanHandlers() {
     return summaries;
   }
 
-  function taintedCallSites(content, lang) {
-    const lines = content.split("\n");
-    const tainted = collectTainted(lines);
-    const nameRe = tainted.size ? new RegExp("\\b(?:" + [...tainted].map(secEsc).join("|") + ")\\b") : null;
+  function taintedCallSites(content, lang, pre) {
+    const lines = pre && pre.lines ? pre.lines : content.split("\n");
+    const tainted = pre && pre.tainted ? pre.tainted : collectTainted(lines);
     const out = [];
     const callRe = /(?:^|[^.\w$])([A-Za-z_]\w*)\s*\(/g;
     for (let li = 0; li < lines.length; li += 1) {
@@ -3194,7 +3411,7 @@ function registerSecScanHandlers() {
         const taintedSlots = new Set();
         args.forEach((a, idx) => {
           if (SANITISER_RE.test(a)) return;
-          if (SOURCE_RE.test(a) || (nameRe && nameRe.test(a))) taintedSlots.add(idx);
+          if (SOURCE_RE.test(a) || hasTaintedIdent(a, tainted)) taintedSlots.add(idx);
         });
         if (taintedSlots.size) out.push({ callee, taintedSlots, line: li + 1 });
       }
@@ -3206,9 +3423,9 @@ function registerSecScanHandlers() {
 
   const FLOW_KEYWORD = /^(?:if|for|while|switch|catch|function|return|def|fn|func|foreach|elsif|unless|new|typeof|await|throw)$/;
 
-  function functionFlows(content, lang) {
-    const lines = content.split("\n");
-    const defs = functionDefs(content, lang);
+  function functionFlows(content, lang, pre) {
+    const lines = pre && pre.lines ? pre.lines : content.split("\n");
+    const defs = pre && pre.defs ? pre.defs : functionDefs(content, lang);
     const out = [];
     for (let i = 0; i < defs.length; i += 1) {
       const body = defBody(lines, defs, i);
@@ -3218,7 +3435,6 @@ function registerSecScanHandlers() {
         if (!seed.length) continue;
         const tainted = collectTainted(body, seed);
         if (!tainted.size) continue;
-        const nameRe = new RegExp("\\b(?:" + [...tainted].map(secEsc).join("|") + ")\\b");
         const callRe = /(?:^|[^.\w$])([A-Za-z_]\w*)\s*\(/g;
         for (let li = 0; li < body.length; li += 1) {
           const line = body[li];
@@ -3233,7 +3449,7 @@ function registerSecScanHandlers() {
             const args = splitArgs(balancedArgs(line, open));
             args.forEach((a, idx) => {
               if (SANITISER_RE.test(a)) return;
-              if (nameRe.test(a)) out.push({ name: defs[i].name, slot: s, callee, calleeSlot: idx, line: defs[i].line + li + 1 });
+              if (hasTaintedIdent(a, tainted)) out.push({ name: defs[i].name, slot: s, callee, calleeSlot: idx, line: defs[i].line + li + 1 });
             });
           }
         }
@@ -3308,21 +3524,29 @@ function registerSecScanHandlers() {
   }
 
   async function analyzeFile(file, content, lang, config) {
-    const sup = secSuppressions(content.split("\n"));
+    const lines = content.split("\n");
+    const sup = secSuppressions(lines);
+    const tainted = collectTainted(lines);
+    const defs = functionDefs(content, lang);
+    const pre = { lines, tainted, defs };
     return {
       file, lang, sup,
-      single: await scanContent(file, content, lang, config, sup),
-      summaries: fileSummaries(content, lang),
-      calls: taintedCallSites(content, lang),
-      flows: functionFlows(content, lang),
+      single: await scanContent(file, content, lang, config, sup, pre),
+      summaries: fileSummaries(content, lang, pre),
+      calls: taintedCallSites(content, lang, pre),
+      flows: functionFlows(content, lang, pre),
     };
   }
 
-  function pkgLineOfKey(content, key) {
+  function buildPkgLineMap(content) {
+    const map = new Map();
     const lines = content.split("\n");
-    const re = new RegExp('"' + key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + '"\\s*:');
-    for (let i = 0; i < lines.length; i += 1) if (re.test(lines[i])) return i + 1;
-    return 1;
+    const keyRe = /^\s*"([^"]+)"\s*:/;
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = keyRe.exec(lines[i]);
+      if (m && !map.has(m[1])) map.set(m[1], i + 1);
+    }
+    return map;
   }
 
   function nextIsVulnerable(raw) {
@@ -3340,13 +3564,36 @@ function registerSecScanHandlers() {
   }
   const SEC_MANIFESTS = new Set(["requirements.txt", "pom.xml", "package-lock.json", "go.mod"]);
 
-  let secProjectOsv = null;
   const SEC_OSV_CACHE = new Map();
   const OSV_ECOSYSTEM = { npm: "npm", pypi: "pip", pip: "pip", maven: "maven", go: "go" };
 
+  function buildOsvEcoIndex(db) {
+    const byEco = { npm: new Map(), pip: new Map(), maven: new Map(), go: new Map() };
+    if (!db || typeof db !== "object") return byEco;
+    for (const eco of ["npm", "pip", "maven", "go"]) {
+      const arr = db[eco];
+      if (!Array.isArray(arr)) continue;
+      const map = byEco[eco];
+      for (const entry of arr) {
+        if (!entry || !entry.name) continue;
+        const lname = String(entry.name).toLowerCase();
+        let list = map.get(lname);
+        if (!list) {
+          list = [];
+          map.set(lname, list);
+        }
+        list.push(entry);
+      }
+    }
+    return byEco;
+  }
+
   function parseOsvDoc(parsed) {
-    const db = { npm: [], pip: [], maven: [], go: [] };
-    if (!parsed || typeof parsed !== "object") return db;
+    const db = { npm: [], pip: [], maven: [], go: [], byEco: null };
+    if (!parsed || typeof parsed !== "object") {
+      db.byEco = buildOsvEcoIndex(db);
+      return db;
+    }
     if (!Array.isArray(parsed) && (parsed.npm || parsed.pip || parsed.maven || parsed.go)) {
       for (const eco of ["npm", "pip", "maven", "go"]) {
         if (!Array.isArray(parsed[eco])) continue;
@@ -3356,6 +3603,7 @@ function registerSecScanHandlers() {
           }
         }
       }
+      db.byEco = buildOsvEcoIndex(db);
       return db;
     }
     const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.entries) ? parsed.entries : Array.isArray(parsed.vulns) ? parsed.vulns : [];
@@ -3385,6 +3633,7 @@ function registerSecScanHandlers() {
         db[eco].push({ name: String(pkg.name), ge: introduced, lt: String(fixed), id, cwe, sev, note });
       }
     }
+    db.byEco = buildOsvEcoIndex(db);
     return db;
   }
 
@@ -3398,7 +3647,7 @@ function registerSecScanHandlers() {
     } catch {
       void 0;
     }
-    const cached = SEC_OSV_CACHE.get(root);
+    const cached = secCacheGetLru(SEC_OSV_CACHE, root);
     if (cached && cached.stamp === stamp) return cached.db;
     let db = null;
     if (stamp !== "none") {
@@ -3408,7 +3657,7 @@ function registerSecScanHandlers() {
         db = null;
       }
     }
-    SEC_OSV_CACHE.set(root, { stamp, db });
+    secCacheSetLru(SEC_OSV_CACHE, root, { stamp, db }, SEC_OSV_CACHE_MAX);
     return db;
   }
 
@@ -3436,6 +3685,17 @@ function registerSecScanHandlers() {
     ],
   };
 
+  const SEC_STATIC_OSV_INDEX = (() => {
+    const merged = { npm: [], pip: [], maven: [], go: [] };
+    for (const eco of ["npm", "pip", "maven", "go"]) {
+      if (SEC_VULN_DB[eco]) merged[eco].push(...SEC_VULN_DB[eco]);
+      if (typeof OSV_SNAPSHOT === "object" && OSV_SNAPSHOT && Array.isArray(OSV_SNAPSHOT[eco])) {
+        merged[eco].push(...OSV_SNAPSHOT[eco]);
+      }
+    }
+    return buildOsvEcoIndex(merged);
+  })();
+
   function cleanVer(s) {
     const m = /(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(s || ""));
     return m ? `${m[1]}.${m[2]}.${m[3] || 0}` : "";
@@ -3449,25 +3709,26 @@ function registerSecScanHandlers() {
     }
     return 0;
   }
-  function vulnList(eco) {
-    const out = [];
-    if (SEC_VULN_DB[eco]) out.push(...SEC_VULN_DB[eco]);
-    if (typeof OSV_SNAPSHOT === "object" && OSV_SNAPSHOT && OSV_SNAPSHOT[eco]) out.push(...OSV_SNAPSHOT[eco]);
-    if (secRemoteOsv && secRemoteOsv[eco]) out.push(...secRemoteOsv[eco]);
-    if (secProjectOsv && secProjectOsv[eco]) out.push(...secProjectOsv[eco]);
-    return out;
+  function matchVulnFromBuckets(clean, buckets) {
+    for (const list of buckets) {
+      if (!list) continue;
+      for (const v of list) {
+        if (v.ge && verCmp(clean, cleanVer(v.ge)) < 0) continue;
+        if (verCmp(clean, cleanVer(v.lt)) < 0) return v;
+      }
+    }
+    return null;
   }
-  function matchVuln(eco, name, version) {
-    const list = vulnList(eco);
+  function matchVuln(eco, name, version, projectOsv) {
     const lname = String(name).toLowerCase();
     const clean = cleanVer(version);
     if (!clean) return null;
-    for (const v of list) {
-      if (String(v.name).toLowerCase() !== lname) continue;
-      if (v.ge && verCmp(clean, cleanVer(v.ge)) < 0) continue;
-      if (verCmp(clean, cleanVer(v.lt)) < 0) return v;
-    }
-    return null;
+    const buckets = [
+      SEC_STATIC_OSV_INDEX[eco] ? SEC_STATIC_OSV_INDEX[eco].get(lname) : null,
+      secRemoteOsv && secRemoteOsv.byEco && secRemoteOsv.byEco[eco] ? secRemoteOsv.byEco[eco].get(lname) : null,
+      projectOsv && projectOsv.byEco && projectOsv.byEco[eco] ? projectOsv.byEco[eco].get(lname) : null,
+    ];
+    return matchVulnFromBuckets(clean, buckets);
   }
   function secLineOfIndex(content, index) {
     let line = 1;
@@ -3487,30 +3748,30 @@ function registerSecScanHandlers() {
     };
   }
 
-  function auditRequirements(file, content) {
+  function auditRequirements(file, content, projectOsv) {
     const out = [];
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i += 1) {
       const m = /^\s*([A-Za-z0-9_.\-]+)\s*(?:==|>=|~=|<=)\s*([0-9][0-9A-Za-z.\-]*)/.exec(lines[i]);
       if (!m) continue;
-      const hit = matchVuln("pip", m[1], m[2]);
+      const hit = matchVuln("pip", m[1], m[2], projectOsv);
       if (hit) out.push(vulnFinding(file, m[1], m[2], hit, i + 1));
     }
     return out;
   }
 
-  function auditPomXml(file, content) {
+  function auditPomXml(file, content, projectOsv) {
     const out = [];
     const re = /<artifactId>\s*([\w.\-]+)\s*<\/artifactId>\s*<version>\s*([\w.\-]+)\s*<\/version>/g;
     let m;
     while ((m = re.exec(content))) {
-      const hit = matchVuln("maven", m[1], m[2]);
+      const hit = matchVuln("maven", m[1], m[2], projectOsv);
       if (hit) out.push(vulnFinding(file, m[1], m[2], hit, secLineOfIndex(content, m.index)));
     }
     return out;
   }
 
-  function auditPackageLock(file, content) {
+  function auditPackageLock(file, content, projectOsv) {
     const out = [];
     let lock;
     try {
@@ -3518,12 +3779,17 @@ function registerSecScanHandlers() {
     } catch {
       return out;
     }
+    let lineMap = null;
+    const lineFor = (name) => {
+      if (!lineMap) lineMap = buildPkgLineMap(content);
+      return lineMap.get(name) || 1;
+    };
     const seen = new Set();
     const check = (name, version) => {
       if (!name || !version || seen.has(`${name}@${version}`)) return;
       seen.add(`${name}@${version}`);
-      const hit = matchVuln("npm", name, version);
-      if (hit) out.push(vulnFinding(file, name, version, hit, pkgLineOfKey(content, name)));
+      const hit = matchVuln("npm", name, version, projectOsv);
+      if (hit) out.push(vulnFinding(file, name, version, hit, lineFor(name)));
     };
     if (lock.packages && typeof lock.packages === "object") {
       for (const [p, info] of Object.entries(lock.packages)) {
@@ -3544,52 +3810,68 @@ function registerSecScanHandlers() {
     return out;
   }
 
-  function auditGoMod(file, content) {
+  function auditGoMod(file, content, projectOsv) {
     const out = [];
     const re = /^\s*(?:require\s+)?([A-Za-z0-9._~/-]+\.[A-Za-z0-9._~/-]+)\s+v([0-9][0-9A-Za-z.\-+]*)/gm;
     let m;
     while ((m = re.exec(content))) {
-      const hit = matchVuln("go", m[1], m[2]);
+      const hit = matchVuln("go", m[1], m[2], projectOsv);
       if (hit) out.push(vulnFinding(file, m[1], `v${m[2]}`, hit, secLineOfIndex(content, m.index)));
     }
     return out;
   }
 
-  function auditManifest(file, content) {
+  function auditManifest(file, content, projectOsv) {
     const base = node_path.basename(file).toLowerCase();
-    if (base === "package.json") return auditPackageJson(file, content);
-    if (base === "package-lock.json") return auditPackageLock(file, content);
-    if (base === "requirements.txt") return auditRequirements(file, content);
-    if (base === "pom.xml") return auditPomXml(file, content);
-    if (base === "go.mod") return auditGoMod(file, content);
+    if (base === "package.json") return auditPackageJson(file, content, projectOsv);
+    if (base === "package-lock.json") return auditPackageLock(file, content, projectOsv);
+    if (base === "requirements.txt") return auditRequirements(file, content, projectOsv);
+    if (base === "pom.xml") return auditPomXml(file, content, projectOsv);
+    if (base === "go.mod") return auditGoMod(file, content, projectOsv);
     return [];
   }
 
-  function auditPackageJson(file, content) {
+  function auditPackageJson(file, content, projectOsv) {
     let pkg;
     try { pkg = JSON.parse(content); } catch { return []; }
     const deps = Object.assign({}, pkg.dependencies, pkg.devDependencies);
     const out = [];
     const norm = node_path.normalize(file);
+    let lineMap = null;
+    const lineFor = (name) => {
+      if (!lineMap) lineMap = buildPkgLineMap(content);
+      return lineMap.get(name) || 1;
+    };
     const nextVer = deps.next;
     if (nextVer && nextIsVulnerable(nextVer)) {
       out.push({ ruleId: "vuln-dep-react2shell", cwe: "CWE-502", severity: "error",
-        message: "Next.js " + nextVer + " is vulnerable to React2Shell (CVE-2025-55182 / CVE-2025-66478): unauthenticated RCE via insecure deserialisation of the RSC Flight reply (a __proto__/constructor gadget reaches the Function constructor → child_process). No app code is required — a static app is affected. Upgrade to 16.0.7 (or 15.5.7 / 15.4.8 / 15.3.6 / 15.2.6 / 15.1.9 / 15.0.5).",
-        file: norm, line: pkgLineOfKey(content, "next"), col: 1 });
+        message: "Next.js " + nextVer + " is vulnerable to React2Shell (CVE-2025-55182 / CVE-2025-66478): unauthenticated RCE via insecure deserialisation of the RSC Flight reply (a __proto__/constructor gadget reaches the Function constructor -> child_process). No app code is required — a static app is affected. Upgrade to 16.0.7 (or 15.5.7 / 15.4.8 / 15.3.6 / 15.2.6 / 15.1.9 / 15.0.5).",
+        file: norm, line: lineFor("next"), col: 1 });
     }
     for (const p of ["react-server-dom-webpack", "react-server-dom-turbopack"]) {
       if (deps[p]) out.push({ ruleId: "vuln-dep-rsc-flight", cwe: "CWE-502", severity: "warning",
         message: p + " is the React Server Components deserialiser at the heart of React2Shell (CVE-2025-55182) — ensure it is on a patched React version.",
-        file: norm, line: pkgLineOfKey(content, p), col: 1 });
+        file: norm, line: lineFor(p), col: 1 });
     }
     for (const [name, ver] of Object.entries(deps)) {
-      const hit = matchVuln("npm", name, ver);
-      if (hit) out.push(vulnFinding(norm, name, ver, hit, pkgLineOfKey(content, name)));
+      const hit = matchVuln("npm", name, ver, projectOsv);
+      if (hit) out.push(vulnFinding(norm, name, ver, hit, lineFor(name)));
     }
     return out;
   }
 
   const secCache = new Map();
+  function secGetFileMap(root) {
+    let fileMap = secCacheGetLru(secCache, root);
+    if (!fileMap) {
+      fileMap = new Map();
+      secCacheSetLru(secCache, root, fileMap, SEC_CACHE_ROOT_MAX);
+    }
+    return fileMap;
+  }
+  function secSetFileEntry(fileMap, key, entry) {
+    secCacheSetLru(fileMap, key, entry, SEC_CACHE_FILE_MAX);
+  }
 
   async function* secWalk(dir, budget, skip) {
     let entries;
@@ -3654,10 +3936,9 @@ function registerSecScanHandlers() {
   async function secScanProject(root) {
     if (!root || typeof root !== "string") return { findings: [], scanned: 0 };
     const config = await readSecConfig(root);
-    secProjectOsv = await readSecOsv(root);
+    const projectOsv = await readSecOsv(root);
     const baseline = await readSecBaseline(root);
-    let fileMap = secCache.get(root);
-    if (!fileMap) { fileMap = new Map(); secCache.set(root, fileMap); }
+    const fileMap = secGetFileMap(root);
     const present = new Set();
     const budget = { files: 0 };
     try {
@@ -3673,7 +3954,7 @@ function registerSecScanHandlers() {
           const pcached = fileMap.get(osFile);
           if (pcached && pcached.mtime === pstats.mtimeMs && pcached.size === pstats.size) continue;
           let pcontent; try { pcontent = await promises.readFile(file, "utf8"); } catch { continue; }
-          fileMap.set(osFile, { file: osFile, lang: "manifest", single: auditManifest(osFile, pcontent), summaries: [], calls: [], flows: [], mtime: pstats.mtimeMs, size: pstats.size });
+          secSetFileEntry(fileMap, osFile, { file: osFile, lang: "manifest", single: auditManifest(osFile, pcontent, projectOsv), summaries: [], calls: [], flows: [], mtime: pstats.mtimeMs, size: pstats.size });
           continue;
         }
         if (!lang) continue;
@@ -3686,7 +3967,7 @@ function registerSecScanHandlers() {
         try { content = await promises.readFile(file, "utf8"); } catch { continue; }
         try {
           const a = await analyzeFile(osFile, content, lang, config);
-          fileMap.set(osFile, { ...a, mtime: stats.mtimeMs, size: stats.size });
+          secSetFileEntry(fileMap, osFile, { ...a, mtime: stats.mtimeMs, size: stats.size });
         } catch {  }
       }
     } catch {  }
@@ -3698,10 +3979,9 @@ function registerSecScanHandlers() {
   async function secScanFile(root, filePath, content) {
     if (!root || typeof root !== "string" || typeof filePath !== "string") return { findings: [] };
     const config = await readSecConfig(root);
-    secProjectOsv = await readSecOsv(root);
+    const projectOsv = await readSecOsv(root);
     const baseline = await readSecBaseline(root);
-    let fileMap = secCache.get(root);
-    if (!fileMap) { fileMap = new Map(); secCache.set(root, fileMap); }
+    const fileMap = secGetFileMap(root);
     const ext = (filePath.split(".").pop() || "").toLowerCase();
     const lang = SEC_LANG[ext];
     const osFile = node_path.normalize(filePath);
@@ -3714,7 +3994,7 @@ function registerSecScanHandlers() {
       if (text !== null && size <= SEC_MAX_BYTES) {
         try {
           const a = await analyzeFile(osFile, text, lang, config);
-          fileMap.set(osFile, { ...a, mtime, size });
+          secSetFileEntry(fileMap, osFile, { ...a, mtime, size });
         } catch {  }
       }
     } else if (node_path.basename(filePath) === "package.json") {
@@ -3724,7 +4004,7 @@ function registerSecScanHandlers() {
         try { const st = await promises.stat(filePath); mtime = st.mtimeMs; size = st.size; text = await promises.readFile(filePath, "utf8"); } catch { text = null; }
       }
       if (text !== null && size <= SEC_MAX_BYTES) {
-        fileMap.set(osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text), summaries: [], calls: [], flows: [], mtime, size });
+        secSetFileEntry(fileMap, osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text, projectOsv), summaries: [], calls: [], flows: [], mtime, size });
       }
     }
     const res = collectFindings(fileMap, config, baseline, root);
@@ -3740,10 +4020,9 @@ function registerSecScanHandlers() {
   electron.ipcMain.handle("security:rescanFile", async (_event, root, filePath, content) => {
     if (!root || typeof root !== "string" || typeof filePath !== "string") return { findings: [] };
     const config = await readSecConfig(root);
-    secProjectOsv = await readSecOsv(root);
+    const projectOsv = await readSecOsv(root);
     const baseline = await readSecBaseline(root);
-    let fileMap = secCache.get(root);
-    if (!fileMap) { fileMap = new Map(); secCache.set(root, fileMap); }
+    const fileMap = secGetFileMap(root);
     const ext = (filePath.split(".").pop() || "").toLowerCase();
     const lang = SEC_LANG[ext];
     const osFile = node_path.normalize(filePath);
@@ -3756,7 +4035,7 @@ function registerSecScanHandlers() {
       if (text !== null && size <= SEC_MAX_BYTES) {
         try {
           const a = await analyzeFile(osFile, text, lang, config);
-          fileMap.set(osFile, { ...a, mtime, size });
+          secSetFileEntry(fileMap, osFile, { ...a, mtime, size });
         } catch {  }
       }
     } else if (node_path.basename(filePath) === "package.json") {
@@ -3766,7 +4045,7 @@ function registerSecScanHandlers() {
         try { const st = await promises.stat(filePath); mtime = st.mtimeMs; size = st.size; text = await promises.readFile(filePath, "utf8"); } catch { text = null; }
       }
       if (text !== null && size <= SEC_MAX_BYTES) {
-        fileMap.set(osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text), summaries: [], calls: [], flows: [], mtime, size });
+        secSetFileEntry(fileMap, osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text, projectOsv), summaries: [], calls: [], flows: [], mtime, size });
       }
     }
     return collectFindings(fileMap, config, baseline, root);

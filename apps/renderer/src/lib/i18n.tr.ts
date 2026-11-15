@@ -1951,4 +1951,13 @@ export const TR: Record<string, string> = {
   "Update & Restart": "Güncelle ve Yeniden Başlat",
   "Wide App checks for updates on startup and installs them automatically from GitHub.": "Wide App açılışta güncellemeleri denetler ve GitHub'dan otomatik olarak kurar.",
   "Wide IDE opened": "Wide IDE açıldı",
+  "Clear History": "Geçmişi Temizle",
+  "Copied Mermaid ERD diagram.": "Mermaid ERD diyagramı kopyalandı.",
+  "Copy Mermaid": "Mermaid Kopyala",
+  "Could not copy Mermaid diagram.": "Mermaid diyagramı kopyalanamadı.",
+  "A crash was detected from the previous session": "Önceki oturumdan bir çökme tespit edildi",
+  "It appears {app} encountered an unexpected error and closed. You can help improve stability by submitting this anonymous report.": "{app} beklenmedik bir hatayla karşılaşıp kapanmış görünüyor. Bu anonim raporu göndererek kararlılığı artırmaya yardımcı olabilirsiniz.",
+  "Type: {kind}": "Tür: {kind}",
+  "Sending...": "Gönderiliyor...",
+  "Send Report": "Raporu Gönder",
 };

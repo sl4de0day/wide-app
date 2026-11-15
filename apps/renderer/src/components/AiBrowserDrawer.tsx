@@ -24,12 +24,14 @@ export function AiBrowserDrawer() {
   const title = useAiBrowser((s) => s.title);
   const loading = useAiBrowser((s) => s.loading);
   const lastAction = useAiBrowser((s) => s.lastAction);
-  const frame = useAiBrowser((s) => s.frame);
+  const lastHighlight = useAiBrowser((s) => s.lastHighlight);
+  const frame = useAiBrowser((s) => (s.drawerOpen ? s.frame : null));
   const history = useAiBrowser((s) => s.history);
   const status = useAiBrowser((s) => s.status);
   const canGoBack = useAiBrowser((s) => s.canGoBack);
   const canGoForward = useAiBrowser((s) => s.canGoForward);
   const proxyPort = useAiBrowser((s) => s.proxyPort);
+  const stealth = useAiBrowser((s) => s.stealth);
   const browserLabel = useAiBrowser((s) => s.browserLabel);
   const installing = useAiBrowser((s) => s.installing);
   const installStatus = useAiBrowser((s) => s.installStatus);
@@ -42,6 +44,7 @@ export function AiBrowserDrawer() {
 
   const [draftUrl, setDraftUrl] = useState(url);
   const [urlFocused, setUrlFocused] = useState(false);
+  const [harNotice, setHarNotice] = useState<string | null>(null);
   const [detected, setDetected] = useState<AiBrowserDetectedInfo | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -73,9 +76,27 @@ export function AiBrowserDrawer() {
     });
   };
 
-  const runNav = (action: "back" | "forward" | "reload" | "toggle_proxy") => {
+  const runNav = (action: "back" | "forward" | "reload" | "toggle_proxy" | "toggle_stealth") => {
     void bridge.aiBrowserNav({ action }).then((res) => {
       if (res.ok && res.session) syncSession(res.session);
+    });
+  };
+
+  const exportHar = () => {
+    void bridge.aiBrowserNav({ action: "export_har" }).then((res) => {
+      if (!res.ok || !res.har) return;
+      const json = JSON.stringify(res.har, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = res.suggestedFilename || `wide-browser-${Date.now()}.har`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 500);
+      setHarNotice(`HAR (${res.entryCount ?? 0})`);
+      setTimeout(() => setHarNotice(null), 2000);
     });
   };
 
@@ -204,6 +225,29 @@ export function AiBrowserDrawer() {
             </button>
             <button
               type="button"
+              onClick={() => runNav("toggle_stealth")}
+              title="Toggle stealth webdriver masking mode"
+              className={`px-2 py-0.5 rounded text-[10px] font-mono border inline-flex items-center gap-1 transition ${
+                stealth
+                  ? "bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25"
+                  : "bg-mono-950 text-mono-400 border-mono-800 hover:text-mono-200"
+              }`}
+            >
+              <ShieldCheck className="w-3 h-3" />
+              {stealth ? "Stealth On" : "Stealth"}
+            </button>
+            <button
+              type="button"
+              onClick={exportHar}
+              disabled={!active}
+              title="Export network trace as HAR 1.2"
+              className="px-2 py-0.5 rounded text-[10px] font-mono border border-mono-800 bg-mono-950 text-mono-300 hover:bg-mono-800 inline-flex items-center gap-1 transition disabled:opacity-40"
+            >
+              <Download className="w-3 h-3" />
+              {harNotice || "HAR"}
+            </button>
+            <button
+              type="button"
               onClick={() => setTakeover(!takeover)}
               disabled={!frame}
               className={`px-2 py-0.5 rounded text-[10px] border inline-flex items-center gap-1 transition disabled:opacity-40 ${
@@ -311,6 +355,22 @@ export function AiBrowserDrawer() {
                 className="w-full h-full block pointer-events-none select-none"
                 draggable={false}
               />
+              {lastHighlight && (
+                <div
+                  className="absolute pointer-events-none border-2 border-amber-400 bg-amber-400/15 rounded-sm shadow-[0_0_0_1px_rgba(0,0,0,0.6)] transition-all duration-150"
+                  style={{
+                    left: `${(lastHighlight.x / 1280) * 100}%`,
+                    top: `${(lastHighlight.y / 800) * 100}%`,
+                    width: `${(lastHighlight.width / 1280) * 100}%`,
+                    height: `${(lastHighlight.height / 800) * 100}%`,
+                  }}
+                >
+                  <span className="absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-amber-500 text-mono-950 font-mono text-[10px] font-semibold whitespace-nowrap shadow">
+                    {lastHighlight.action}
+                    {lastHighlight.target ? `: ${lastHighlight.target}` : ""}
+                  </span>
+                </div>
+              )}
               <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-mono-950/80 border border-mono-700/60 text-[10px] text-mono-300 font-mono pointer-events-none">
                 {takeover ? "INTERACTIVE" : "LIVE STREAM"}
               </div>

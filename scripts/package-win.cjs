@@ -57,7 +57,7 @@ for (const [src, dest] of copyTargets) {
 }
 
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-const version = rootPkg.version || '0.4141126';
+const version = rootPkg.version || '0.5151126';
 const pkg = {
   name: 'wide-app',
   version,

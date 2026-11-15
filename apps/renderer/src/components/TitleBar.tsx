@@ -52,7 +52,7 @@ export function TitleBar() {
     activeAiChatId ||
     useEditor.getState().tabs.find((tab) => tab.kind === "ai-chat")?.path.slice(AI_CHAT_PATH.length) ||
     null;
-  const currentChat = useAi((state) => (currentChatId ? state.chats[currentChatId] : null));
+  const currentSessionTitle = useAi((state) => (currentChatId ? state.sessions.find((s) => s.id === currentChatId)?.title : null));
   const canOpenIde = Boolean(currentChatId || rootName);
 
   const hasCodeberg = useExtensions((state) => state.installed.has("codeberg"));
@@ -103,8 +103,9 @@ export function TitleBar() {
           type="button"
           title={t("Open in Wide IDE")}
           onClick={async () => {
+            const currentChat = currentChatId ? useAi.getState().chats[currentChatId] : null;
             const currentRoot = useWorkspace.getState().root || currentChat?.root || "";
-            const currentTitle = activeTab?.name || currentChat?.title || t("New conversation");
+            const currentTitle = activeTab?.name || currentSessionTitle || t("New conversation");
             if (currentChatId) {
               if (currentChat?.history?.length) {
                 await bridge.aiSaveSession(currentChatId, currentRoot, currentChat.history);

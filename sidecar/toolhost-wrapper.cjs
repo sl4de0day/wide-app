@@ -6,11 +6,18 @@ const listeners = new Set();
 process.parentPort = {
   postMessage(message) { try { process.send(message); } catch {} },
   on(ev, fn) { if (ev === 'message') listeners.add(fn); },
-  once(ev, fn) { if (ev === 'message') listeners.add(fn); },
-  removeListener(ev, fn) { listeners.delete(fn); },
+  once(ev, fn) {
+    if (ev !== 'message') return;
+    const wrapper = (msg) => {
+      listeners.delete(wrapper);
+      fn(msg);
+    };
+    listeners.add(wrapper);
+  },
+  removeListener(ev, fn) { if (!ev || ev === 'message') listeners.delete(fn); },
   start() {},
 };
 
-process.on('message', (m) => { for (const fn of listeners) fn({ data: m }); });
+process.on('message', (m) => { for (const fn of [...listeners]) fn({ data: m }); });
 
 require(path.resolve(__dirname, '..', 'out', 'main', 'toolHost.js'));

@@ -25,29 +25,54 @@ function makeDebugger(targetId) {
   let attached = false;
   const listeners = new Set();
   const dbg = {
-    attach() { attached = true; bridge.hostRequest('cdp:attach', { targetId }); },
-    detach() { attached = false; bridge.hostRequest('cdp:detach', { targetId }); },
+    attach() {
+      attached = true;
+      Promise.resolve(bridge.hostRequest('cdp:attach', { targetId })).catch(() => {});
+    },
+    detach() {
+      attached = false;
+      listeners.clear();
+      Promise.resolve(bridge.hostRequest('cdp:detach', { targetId })).catch(() => {});
+    },
     isAttached() { return attached; },
-    on(ev, fn) { if (ev === 'message') listeners.add(fn); },
+    on(ev, fn) { if (ev === 'message' && typeof fn === 'function') listeners.add(fn); },
+    removeListener(ev, fn) { if (ev === 'message') listeners.delete(fn); },
+    off(ev, fn) { if (ev === 'message') listeners.delete(fn); },
     async sendCommand(method, params) {
       return bridge.hostRequest('cdp:send', { targetId, method, params: params || {} });
     },
-    __emit(method, params) { for (const fn of listeners) fn({}, method, params); },
+    __emit(method, params) { for (const fn of [...listeners]) fn({}, method, params); },
   };
   return dbg;
 }
 
 const webContentsById = new Map();
 function makeWebContents(id) {
+  let destroyed = false;
   const wc = {
     id,
-    send(channel, payload) { bridge.sendEvent(channel, payload); },
+    send(channel, payload) {
+      if (!destroyed) bridge.sendEvent(channel, payload);
+    },
     executeJavaScript(code) { return bridge.hostRequest('webview:eval', { code }); },
     on() {}, once() {},
     setWindowOpenHandler() {},
-    isDestroyed() { return false; },
+    isDestroyed() { return destroyed; },
+    destroy() {
+      destroyed = true;
+      wc.debugger?.detach?.();
+      if (id !== 1) webContentsById.delete(id);
+    },
     debugger: makeDebugger(id),
   };
+  if (id !== 1 && webContentsById.size > 200) {
+    for (const key of webContentsById.keys()) {
+      if (key !== 1) {
+        webContentsById.delete(key);
+        break;
+      }
+    }
+  }
   webContentsById.set(id, wc);
   return wc;
 }
@@ -55,7 +80,10 @@ function makeWebContents(id) {
 const mainWebContents = makeWebContents(1);
 
 const webContents = {
-  fromId(id) { return webContentsById.get(id) || makeWebContents(id); },
+  fromId(id) {
+    if (id == null) return mainWebContents;
+    return webContentsById.get(id) || makeWebContents(id);
+  },
   from(id) { return this.fromId(id); },
 };
 
@@ -68,16 +96,29 @@ class BrowserWindow {
     allWindows.push(this);
   }
   static getAllWindows() { return allWindows.filter((w) => !w._destroyed); }
-  static fromWebContents() { return allWindows[0] || mainBrowserWindow; }
+  static fromWebContents(wc) {
+    return allWindows.find((w) => !w._destroyed && w.webContents === wc)
+      || allWindows.find((w) => !w._destroyed)
+      || mainBrowserWindow;
+  }
   loadFile() { return Promise.resolve(); }
   loadURL() { return Promise.resolve(); }
   on() { return this; }
   once() { return this; }
   show() {}
   focus() {}
-  setTitle(title) { bridge.hostRequest('window:setTitle', { title }); }
+  setTitle(title) {
+    Promise.resolve(bridge.hostRequest('window:setTitle', { title })).catch(() => {});
+  }
   isDestroyed() { return this._destroyed; }
-  destroy() { this._destroyed = true; }
+  destroy() {
+    this._destroyed = true;
+    const idx = allWindows.indexOf(this);
+    if (idx !== -1) allWindows.splice(idx, 1);
+    if (this.webContents && this.webContents.id !== 1) {
+      this.webContents.destroy?.();
+    }
+  }
   webContentsId() { return this.webContents.id; }
 }
 const mainBrowserWindow = new BrowserWindow();
@@ -89,8 +130,12 @@ const dialog = {
 };
 
 const shell = {
-  openExternal(url) { bridge.hostRequest('shell:openExternal', { url }); return Promise.resolve(); },
-  showItemInFolder(p) { bridge.hostRequest('shell:showItemInFolder', { path: p }); },
+  openExternal(url) {
+    return Promise.resolve(bridge.hostRequest('shell:openExternal', { url })).catch(() => {});
+  },
+  showItemInFolder(p) {
+    Promise.resolve(bridge.hostRequest('shell:showItemInFolder', { path: p })).catch(() => {});
+  },
   async trashItem(p) { return bridge.hostRequest('shell:trashItem', { path: p }); },
 };
 
@@ -103,11 +148,17 @@ function masterFile() { return path.join(userDataDir(), '.enc-master'); }
 function legacyKeyFile() { return path.join(userDataDir(), '.enc-key'); }
 function legacyWrapFile() { return path.join(userDataDir(), '.enc-legacy'); }
 
+let machineGuidCache = null;
 function machineGuid() {
+  if (machineGuidCache !== null) return machineGuidCache;
   if (process.platform !== 'win32') {
     for (const file of ['/etc/machine-id', '/var/lib/dbus/machine-id']) {
-      try { return fs.readFileSync(file, 'utf8').trim(); } catch {}
+      try {
+        machineGuidCache = fs.readFileSync(file, 'utf8').trim();
+        return machineGuidCache;
+      } catch {}
     }
+    machineGuidCache = '';
     return '';
   }
   try {
@@ -117,8 +168,12 @@ function machineGuid() {
       { encoding: 'utf8', windowsHide: true, timeout: 4000, stdio: ['ignore', 'pipe', 'ignore'] },
     );
     const found = /MachineGuid\s+REG_\w+\s+(\S+)/i.exec(out);
-    return found ? found[1] : '';
-  } catch { return ''; }
+    machineGuidCache = found ? found[1] : '';
+    return machineGuidCache;
+  } catch {
+    machineGuidCache = '';
+    return '';
+  }
 }
 
 let encSecretCache = null;
@@ -308,16 +363,27 @@ function portableRoot() {
   return portableRootCache;
 }
 
+let userDataDirCache = null;
 function userDataDir() {
+  if (userDataDirCache) return userDataDirCache;
   const root = portableRoot();
   const base = process.platform === 'win32'
     ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'))
     : (process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'));
   const dir = root ? path.join(root, 'data') : path.join(base, 'wide');
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  userDataDirCache = dir;
   return dir;
 }
 const appListeners = new Map();
+let shutdownHandler = null;
+function setShutdownHandler(fn) { shutdownHandler = fn; }
+function runShutdown() {
+  if (typeof shutdownHandler === 'function') {
+    return Promise.resolve().then(() => shutdownHandler());
+  }
+  return Promise.resolve().then(() => app.emit('before-quit'));
+}
 let quitting = false;
 const app = {
   whenReady() { return Promise.resolve(); },
@@ -337,7 +403,9 @@ const app = {
     if (quitting) return;
     quitting = true;
     app.emit('before-quit');
-    process.exit(0);
+    const force = setTimeout(() => process.exit(0), 2500);
+    if (typeof force.unref === 'function') force.unref();
+    runShutdown().catch(() => {}).finally(() => process.exit(0));
   },
   getAppPath() { return projectRoot; },
   getPath(name) {
@@ -353,12 +421,23 @@ const app = {
 };
 
 const utilityProcess = {
-  fork(entry, args = [], options = {}) {
+  fork(entry, args = [], _options = {}) {
     const wrapper = path.join(__dirname, 'toolhost-wrapper.cjs');
     const child = cp.fork(wrapper, [entry, ...args], {
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
       env: process.env,
     });
+    const errorListeners = new Set();
+    child.on('error', (err) => {
+      for (const fn of [...errorListeners]) {
+        try { fn(err); } catch {}
+      }
+    });
+    const wrapListener = (ev, fn) => {
+      if (ev === 'message') return (m) => fn(m);
+      if (ev === 'exit') return (code) => fn(code);
+      return fn;
+    };
 
     return {
       pid: child.pid,
@@ -366,14 +445,32 @@ const utilityProcess = {
       stderr: child.stderr,
       postMessage(message) { try { child.send(message); } catch {} },
       on(ev, fn) {
-        if (ev === 'message') child.on('message', (m) => fn(m));
-        else if (ev === 'exit') child.on('exit', (code) => fn(code));
-        else if (ev === 'spawn') child.on('spawn', fn);
-        else child.on(ev, fn);
+        if (ev === 'error') {
+          if (typeof fn === 'function') errorListeners.add(fn);
+          return this;
+        }
+        child.on(ev, wrapListener(ev, fn));
         return this;
       },
-      once(ev, fn) { child.once(ev, fn); return this; },
-      kill() { try { child.kill(); } catch {} },
+      once(ev, fn) {
+        if (ev === 'error') {
+          if (typeof fn === 'function') {
+            const w = (err) => { errorListeners.delete(w); fn(err); };
+            errorListeners.add(w);
+          }
+          return this;
+        }
+        child.once(ev, wrapListener(ev, fn));
+        return this;
+      },
+      kill() {
+        if (process.platform === 'win32' && child.pid) {
+          try {
+            cp.execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+          } catch {}
+        }
+        try { child.kill('SIGKILL'); } catch {}
+      },
     };
   },
 };
@@ -399,6 +496,8 @@ module.exports = {
   hostRequest(method, params) { return bridge.hostRequest(method, params || {}); },
 
   __setBridge: setBridge,
+  __setShutdown: setShutdownHandler,
+  __shutdown: runShutdown,
   __initSecrets: initSecrets,
   __markReady: markReady,
   __whenReady: whenReady,

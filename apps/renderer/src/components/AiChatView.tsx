@@ -44,7 +44,7 @@ import { diffCounts, lineDiff } from "@/lib/lineDiff";
 import { plainText } from "@/lib/plainText";
 import { basename, cn, copyText } from "@/lib/utils";
 import { toast } from "@/stores/toast";
-import { AI_IMAGE_PROVIDERS, openWideToolTab, useAi, type AiImage, type AiToolStep, type AiTurn } from "@/stores/ai";
+import { AI_IMAGE_PROVIDERS, keptChatUiFor, openWideToolTab, useAi, type AiImage, type AiToolStep, type AiTurn } from "@/stores/ai";
 import { useAiBrowser } from "@/stores/aiBrowser";
 import { useEditor } from "@/stores/editor";
 import { useWorkspace } from "@/stores/workspace";
@@ -52,9 +52,6 @@ import { useRun } from "@/stores/run";
 import { useCommandPalette } from "@/stores/commands";
 import { confirm } from "@/stores/confirm";
 import wideLogo from "@/assets/wide-logo.png";
-
-const kept: Record<string, { draft: string; scroll: number; pinned: boolean }> = {};
-const keptFor = (id: string) => (kept[id] ??= { draft: "", scroll: 0, pinned: true });
 
 const NOTHING_ATTACHED: string[] = [];
 const NO_IMAGES: AiImage[] = [];
@@ -1971,7 +1968,7 @@ export function AiChatView({ id }: { id: string }) {
   const attachments = useAi((state) => state.attachments[id] ?? NOTHING_ATTACHED);
   const { ready } = useModelLabel();
 
-  const store = keptFor(id);
+  const store = keptChatUiFor(id);
   const [draft, setDraft] = useState(store.draft);
 
   const onSpeechResult = useCallback((text: string) => {

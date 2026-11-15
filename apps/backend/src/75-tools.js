@@ -139,6 +139,7 @@ function openSplash() {
   });
   openedAt = Date.now();
   giveUp = setTimeout(closeSplash, GIVE_UP_MS);
+  giveUp.unref?.();
   return splash;
 }
 function closeSplash() {

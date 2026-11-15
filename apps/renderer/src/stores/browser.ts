@@ -48,6 +48,13 @@ interface BrowserState {
   active(): BrowserTab | undefined;
 }
 
+const BROWSER_EMOJI_RE =
+  /(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u2600-\u27BF])(?:\uFE0F|\uFE0E|[\u{1F3FB}-\u{1F3FF}])?(?:\u200D(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u2600-\u27BF])(?:\uFE0F|\uFE0E|[\u{1F3FB}-\u{1F3FF}])?)+|[0-9#*]\uFE0F?\u20E3|[\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]|\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?|\p{Emoji_Presentation}(?:\uFE0F|\uFE0E)?|[\u231A-\u23FF\u2600-\u27BF\u2B05-\u2B55][\uFE0E\uFE0F]?|[\u2139\u2194-\u21AA\u24C2\u25AA-\u25FE\u2934-\u2935\u3030\u303D\u3297\u3299]\uFE0F|[\uFE0E\uFE0F\u200D\u20E3]/gu;
+
+function sanitizeBrowserTitle(text: string): string {
+  return String(text ?? "").replace(BROWSER_EMOJI_RE, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
 const patchActive = (tabs: BrowserTab[], activeId: string, patch: Partial<BrowserTab>) =>
   tabs.map((tab) => (tab.id === activeId ? { ...tab, ...patch } : tab));
 
@@ -104,7 +111,7 @@ export const useBrowser = create<BrowserState>((set, get) => ({
       const id = event.tabId && known ? event.tabId : state.activeId;
       const patch: Partial<BrowserTab> = {};
       if (event.url !== undefined) patch.url = event.url;
-      if (event.title !== undefined) patch.title = event.title;
+      if (event.title !== undefined) patch.title = sanitizeBrowserTitle(event.title);
       if (event.loading !== undefined) patch.loading = event.loading;
       if (event.canGoBack !== undefined) patch.canBack = event.canGoBack;
       if (event.canGoForward !== undefined) patch.canForward = event.canGoForward;

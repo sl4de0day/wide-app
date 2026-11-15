@@ -45,6 +45,33 @@ const DB_TLS_MODES = new Set(["disable", "prefer", "require", "verify-full"]);
 const DB_DEFAULT_PORTS = { postgres: 5432, mysql: 3306, redis: 6379 };
 
 const dbSessions = new Map();
+const dbSessionInflight = new Map();
+const dbSessionGen = new Map();
+const dbActiveQueries = new Map();
+let dbHistoryChain = Promise.resolve();
+let dbVaultChain = Promise.resolve();
+
+function dbRunWithTimeout(promiseFactory, timeoutMs, onAbort) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (ok, val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (ok) resolve(val);
+      else reject(val);
+    };
+    const timer = setTimeout(() => {
+      try { onAbort?.(); } catch {}
+      finish(false, new Error(`Database operation timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+    timer.unref?.();
+    Promise.resolve().then(promiseFactory).then(
+      (res) => finish(true, res),
+      (err) => finish(false, err)
+    );
+  });
+}
 
 function dbMetaPath() {
   return node_path.join(electron.app.getPath("userData"), "database-connections.json");
@@ -52,6 +79,50 @@ function dbMetaPath() {
 
 function dbVaultPath() {
   return node_path.join(electron.app.getPath("userData"), "database-vault.bin");
+}
+
+function dbHistoryPath() {
+  return node_path.join(electron.app.getPath("userData"), "recent-queries.json");
+}
+
+async function dbReadHistory() {
+  try {
+    const raw = await promises.readFile(dbHistoryPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function dbWriteHistory(items) {
+  const clean = Array.isArray(items) ? items.slice(0, 50) : [];
+  await promises.mkdir(node_path.dirname(dbHistoryPath()), { recursive: true });
+  await writeFileAtomic(dbHistoryPath(), JSON.stringify(clean, null, 2), "utf8");
+  return clean;
+}
+
+function dbRecordHistoryEntry(entry) {
+  dbHistoryChain = dbHistoryChain.then(async () => {
+    try {
+      const safeSql = dbRedactError(String(entry.sql || "")).trim().slice(0, 8000);
+      if (!safeSql) return;
+      const item = {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        connectionId: String(entry.connectionId || ""),
+        sql: safeSql,
+        durationMs: Number(entry.durationMs || 0),
+        rowCount: Number(entry.rowCount || 0),
+        ...(entry.error ? { error: dbRedactError(entry.error).slice(0, 500) } : {}),
+        ranAt: Date.now(),
+      };
+      const existing = await dbReadHistory();
+      await dbWriteHistory([item, ...existing.slice(0, 49)]);
+    } catch {
+      void 0;
+    }
+  });
+  return dbHistoryChain;
 }
 
 function dbRedactError(error) {
@@ -112,34 +183,62 @@ async function dbWriteConnectionsMeta(list) {
   await writeFileAtomic(dbMetaPath(), JSON.stringify(list, null, 2), "utf8");
 }
 
-async function dbReadVaultMap() {
+async function dbBackupCorruptVault(vaultPath) {
   try {
-    const buf = await promises.readFile(dbVaultPath());
-    if (!buf || buf.length < 2) return {};
+    const backup = `${vaultPath}.corrupt-${Date.now()}`;
+    await promises.copyFile(vaultPath, backup);
+  } catch {
+    void 0;
+  }
+}
+
+async function dbReadVaultMap() {
+  const vaultPath = dbVaultPath();
+  let buf;
+  try {
+    buf = await promises.readFile(vaultPath);
+  } catch (error) {
+    if (error && error.code === "ENOENT") return {};
+    throw error;
+  }
+  if (!buf || buf.length < 2) {
+    await dbBackupCorruptVault(vaultPath);
+    throw new Error("Database credential vault is truncated; backup preserved.");
+  }
+  try {
     const flag = buf[0];
     const payload = buf.subarray(1);
     let json = "";
     if (flag === 1) {
       if (!electron.safeStorage?.isEncryptionAvailable?.()) {
-        return {};
+        throw new Error("System safeStorage encryption is unavailable to decrypt saved database credentials.");
       }
       json = electron.safeStorage.decryptString(payload);
     } else {
       json = payload.toString("utf8");
     }
     const parsed = JSON.parse(json);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Invalid database vault structure.");
+    }
+    return parsed;
+  } catch (error) {
+    await dbBackupCorruptVault(vaultPath);
+    throw new Error(`Database credential vault could not be read: ${dbRedactError(error)}`);
   }
 }
 
-async function dbWriteVaultMap(map) {
-  const json = JSON.stringify(map || {});
-  const canEncrypt = Boolean(electron.safeStorage?.isEncryptionAvailable?.());
-  const payload = canEncrypt ? electron.safeStorage.encryptString(json) : Buffer.from(json, "utf8");
-  const out = Buffer.concat([Buffer.from([canEncrypt ? 1 : 0]), Buffer.from(payload)]);
-  await writeFileAtomic(dbVaultPath(), out);
+function dbWriteVaultMap(map) {
+  const run = async () => {
+    const json = JSON.stringify(map || {});
+    const canEncrypt = Boolean(electron.safeStorage?.isEncryptionAvailable?.());
+    const payload = canEncrypt ? electron.safeStorage.encryptString(json) : Buffer.from(json, "utf8");
+    const out = Buffer.concat([Buffer.from([canEncrypt ? 1 : 0]), Buffer.from(payload)]);
+    await writeFileAtomic(dbVaultPath(), out);
+  };
+  const next = dbVaultChain.then(run, run);
+  dbVaultChain = next.catch(() => void 0);
+  return next;
 }
 
 function dbParseConnectionString(rawUri, fallbackEngine) {
@@ -381,6 +480,11 @@ async function dbOpenSshTunnel(meta, remoteHost, remotePort) {
   child.stderr?.on("data", (chunk) => {
     stderrText = (stderrText + chunk.toString("utf8")).slice(-2000);
   });
+  child.on("error", (err) => {
+    exited = true;
+    exitCode = err?.code || "error";
+    stderrText = (stderrText + " " + String(err?.message || err)).slice(-2000);
+  });
   child.on("exit", (code) => {
     exited = true;
     exitCode = code;
@@ -406,7 +510,7 @@ async function dbOpenSshTunnel(meta, remoteHost, remotePort) {
   throw new Error(`SSH tunnel timed out waiting for port forward (${stderrText.trim() || "no response"}).`);
 }
 
-function dbBuildTlsOptions(meta) {
+async function dbBuildTlsOptions(meta) {
   const mode = String(meta.tlsMode || "prefer").toLowerCase();
   if (mode === "disable") return false;
   const ssl = {};
@@ -416,7 +520,7 @@ function dbBuildTlsOptions(meta) {
     ssl.rejectUnauthorized = false;
   }
   if (meta.caPath) {
-    ssl.ca = node_fs.readFileSync(meta.caPath, "utf8");
+    ssl.ca = await promises.readFile(meta.caPath, "utf8");
   }
   return ssl;
 }
@@ -433,7 +537,7 @@ async function dbOpenDriverSession(meta, secret) {
 
     if (meta.engine === "sqlite") {
       if (!meta.filePath) throw new Error("SQLite file path is required.");
-      if (meta.readOnly && !exists(meta.filePath)) {
+      if (meta.readOnly && !(await exists(meta.filePath))) {
         throw new Error(`SQLite database file not found: ${meta.filePath}`);
       }
       const { DatabaseSync } = dbLoadSqlite();
@@ -468,7 +572,7 @@ async function dbOpenDriverSession(meta, secret) {
 
     if (meta.engine === "postgres") {
       const Client = vendor.pg.Client;
-      const sslOpt = dbBuildTlsOptions(meta);
+      const sslOpt = await dbBuildTlsOptions(meta);
       const client = new Client({
         host: connectHost,
         port: connectPort,
@@ -477,6 +581,7 @@ async function dbOpenDriverSession(meta, secret) {
         password: secret?.password || undefined,
         ssl: sslOpt,
         connectionTimeoutMillis: 10000,
+        query_timeout: 30000,
       });
       await client.connect();
       const verRes = await client.query("SELECT version() AS v");
@@ -486,8 +591,13 @@ async function dbOpenDriverSession(meta, secret) {
         client,
         tunnel,
         serverVersion: rawVer,
-        async query(sql, params = []) {
-          const res = await client.query(sql, params);
+        async query(sql, params = [], opts = {}) {
+          const timeoutMs = Math.max(1000, Math.min(300000, Number(opts?.timeoutMs || 30000) || 30000));
+          const res = await dbRunWithTimeout(
+            () => client.query(sql, params),
+            timeoutMs,
+            () => { try { client.end().catch(() => void 0); } catch {} }
+          );
           const cols = (res.fields || []).map((f) => ({ name: f.name, type: String(f.dataTypeID || "") }));
           return {
             columns: cols,
@@ -506,7 +616,7 @@ async function dbOpenDriverSession(meta, secret) {
     }
 
     if (meta.engine === "mysql") {
-      const sslOpt = dbBuildTlsOptions(meta);
+      const sslOpt = await dbBuildTlsOptions(meta);
       const cfg = {
         host: connectHost,
         port: connectPort,
@@ -524,8 +634,14 @@ async function dbOpenDriverSession(meta, secret) {
         client: conn,
         tunnel,
         serverVersion: `MySQL ${verRows?.[0]?.v || ""}`.trim(),
-        async query(sql, params = []) {
-          const [res, fields] = params && params.length > 0 ? await conn.execute(sql, params) : await conn.query(sql);
+        async query(sql, params = [], opts = {}) {
+          const timeoutMs = Math.max(1000, Math.min(300000, Number(opts?.timeoutMs || 30000) || 30000));
+          const execRes = await dbRunWithTimeout(
+            () => (params && params.length > 0 ? conn.execute({ sql, timeout: timeoutMs }, params) : conn.query({ sql, timeout: timeoutMs })),
+            timeoutMs + 1000,
+            () => { try { conn.destroy(); } catch {} }
+          );
+          const [res, fields] = execRes;
           if (Array.isArray(res)) {
             const cols = (fields || []).map((f) => ({ name: f.name, type: String(f.columnType || f.type || "") }));
             return { columns: cols, rows: dbNormalizeRows(res), changes: res.length };
@@ -545,7 +661,7 @@ async function dbOpenDriverSession(meta, secret) {
     if (meta.engine === "redis") {
       const Redis = vendor.Redis;
       const dbIndex = Number.isFinite(Number(meta.database)) && meta.database !== "" ? Number(meta.database) : 0;
-      const sslOpt = dbBuildTlsOptions(meta);
+      const sslOpt = await dbBuildTlsOptions(meta);
       const client = new Redis({
         host: connectHost,
         port: connectPort,
@@ -555,6 +671,7 @@ async function dbOpenDriverSession(meta, secret) {
         tls: sslOpt || undefined,
         lazyConnect: true,
         connectTimeout: 8000,
+        commandTimeout: 15000,
         maxRetriesPerRequest: 1,
       });
       client.on("error", () => void 0);
@@ -597,6 +714,7 @@ async function dbOpenDriverSession(meta, secret) {
 }
 
 async function dbCloseSessionEntry(id) {
+  dbSessionGen.set(id, (dbSessionGen.get(id) || 0) + 1);
   const entry = dbSessions.get(id);
   if (!entry) return;
   dbSessions.delete(id);
@@ -614,24 +732,67 @@ async function dbCloseSessionEntry(id) {
   }
 }
 
+function dbAttachSessionEviction(id, session) {
+  const evict = () => {
+    if (dbSessions.get(id) === session) {
+      void dbCloseSessionEntry(id);
+    }
+  };
+  if (session.tunnel?.child) {
+    session.tunnel.child.once("exit", evict);
+    session.tunnel.child.once("close", evict);
+  }
+  if (session.engine === "postgres" && session.client?.on) {
+    session.client.on("error", evict);
+    session.client.once("end", evict);
+  } else if (session.engine === "mysql" && session.client?.on) {
+    session.client.on("error", evict);
+    session.client.once("end", evict);
+  } else if (session.engine === "redis" && session.client?.once) {
+    session.client.once("end", evict);
+  }
+}
+
 async function dbEnsureSession(id) {
-  const existing = dbSessions.get(id);
   const metas = await dbReadConnectionsMeta();
   const meta = metas.find((m) => m.id === id);
   if (!meta) throw new Error(`Connection not found: ${id}`);
+
+  const existing = dbSessions.get(id);
   if (existing) {
     existing.meta = meta;
     return existing;
   }
-  const vault = await dbReadVaultMap();
-  const session = await dbOpenDriverSession(meta, vault[id] || {});
-  session.meta = meta;
-  dbSessions.set(id, session);
-  if (session.serverVersion && meta.lastServerVersion !== session.serverVersion) {
-    meta.lastServerVersion = session.serverVersion;
-    await dbWriteConnectionsMeta(metas);
-  }
-  return session;
+
+  const pending = dbSessionInflight.get(id);
+  if (pending) return pending;
+
+  const gen = dbSessionGen.get(id) || 0;
+  const opener = (async () => {
+    const vault = await dbReadVaultMap();
+    const session = await dbOpenDriverSession(meta, vault[id] || {});
+    if ((dbSessionGen.get(id) || 0) !== gen) {
+      try { await session.close(); } catch {}
+      if (session.tunnel?.child) {
+        try { killProcessTree(session.tunnel.child); } catch {}
+      }
+      throw new Error("Connection was closed or updated while opening.");
+    }
+    session.meta = meta;
+    dbSessions.set(id, session);
+    dbAttachSessionEviction(id, session);
+    if (session.serverVersion && meta.lastServerVersion !== session.serverVersion) {
+      meta.lastServerVersion = session.serverVersion;
+      await dbWriteConnectionsMeta(metas);
+    }
+    return session;
+  })().finally(() => {
+    if (dbSessionInflight.get(id) === opener) {
+      dbSessionInflight.delete(id);
+    }
+  });
+  dbSessionInflight.set(id, opener);
+  return opener;
 }
 
 function dbStripSqlCommentsAndLiterals(sql) {
@@ -1192,7 +1353,7 @@ function dbBuildParameterizedMutation(engine, change) {
 }
 
 async function dbDiscoverWorkspace(root) {
-  if (!root || !exists(root)) return [];
+  if (!root || !(await exists(root))) return [];
   const findings = [];
   const skipDirs = new Set(["node_modules", ".git", "dist", "out", "build", "target", ".venv", "__pycache__", ".next"]);
 
@@ -1338,7 +1499,7 @@ async function dbRunSecurityAudit(session) {
         `Connection "${meta.name}" uses tlsMode=prefer/require without verify-full CA pinning.`
       );
     }
-  } else if (meta.filePath && exists(meta.filePath)) {
+  } else if (meta.filePath && (await exists(meta.filePath))) {
     try {
       const fd = await promises.open(meta.filePath, "r");
       const buf = Buffer.alloc(16);
@@ -1568,6 +1729,11 @@ async function aiDbQueryReadonly(connectionId, sql, limit = 100) {
 }
 
 async function disposeDatabases() {
+  dbSessionInflight.clear();
+  for (const active of dbActiveQueries.values()) {
+    try { active.cancel(); } catch {}
+  }
+  dbActiveQueries.clear();
   const ids = Array.from(dbSessions.keys());
   for (const id of ids) {
     await dbCloseSessionEntry(id);
@@ -1578,8 +1744,18 @@ function registerDatabaseHandlers() {
   electron.ipcMain.handle("db:list", async () => {
     try {
       const metas = await dbReadConnectionsMeta();
-      const vault = await dbReadVaultMap();
-      return { ok: true, connections: metas.map((m) => dbMaskSummary(m, vault[m.id])) };
+      let vault = {};
+      let vaultError = null;
+      try {
+        vault = await dbReadVaultMap();
+      } catch (err) {
+        vaultError = dbRedactError(err);
+      }
+      return {
+        ok: true,
+        connections: metas.map((m) => dbMaskSummary(m, vault[m.id])),
+        ...(vaultError ? { vaultError } : {}),
+      };
     } catch (error) {
       return { ok: false, error: dbRedactError(error) };
     }
@@ -1718,24 +1894,62 @@ function registerDatabaseHandlers() {
       }
       const started = Date.now();
       const params = Array.isArray(options?.params) ? options.params : [];
-      const res = await session.query(execSql, params);
-      const durationMs = Date.now() - started;
-      const truncated = appliedLimit !== null && res.rows.length > appliedLimit;
-      const finalRows = truncated ? res.rows.slice(0, appliedLimit) : res.rows;
-      return {
-        ok: true,
-        result: {
-          columns: res.columns,
-          rows: finalRows,
-          rowCount: res.columns.length > 0 ? finalRows.length : res.changes,
-          affectedRows: res.changes,
+      const queryKey = String(options?.queryId || id || "");
+      let cancelled = false;
+      const cancelPromise = new Promise((_resolve, reject) => {
+        dbActiveQueries.set(queryKey, {
+          cancel: () => {
+            cancelled = true;
+            reject(new Error("Query cancelled."));
+            if (session.engine !== "sqlite") {
+              void dbCloseSessionEntry(String(id || ""));
+            }
+          },
+        });
+      });
+      try {
+        const res = await Promise.race([
+          session.query(execSql, params, { timeoutMs: options?.timeoutMs }),
+          cancelPromise,
+        ]);
+        const durationMs = Date.now() - started;
+        const truncated = appliedLimit !== null && res.rows.length > appliedLimit;
+        const finalRows = truncated ? res.rows.slice(0, appliedLimit) : res.rows;
+        const rowCount = res.columns.length > 0 ? finalRows.length : res.changes;
+        await dbRecordHistoryEntry({
+          connectionId: String(id || ""),
+          sql: rawSql,
           durationMs,
-          appliedLimit,
-          truncated,
-          isExplain: Boolean(options?.explain),
-          statementType: analysis.keyword || "SQL",
-        },
-      };
+          rowCount,
+        });
+        return {
+          ok: true,
+          result: {
+            columns: res.columns,
+            rows: finalRows,
+            rowCount,
+            affectedRows: res.changes,
+            durationMs,
+            appliedLimit,
+            truncated,
+            isExplain: Boolean(options?.explain),
+            statementType: analysis.keyword || "SQL",
+          },
+        };
+      } catch (execError) {
+        if (!cancelled) {
+          await dbRecordHistoryEntry({
+            connectionId: String(id || ""),
+            sql: rawSql,
+            durationMs: Date.now() - started,
+            rowCount: 0,
+            error: execError,
+          });
+        }
+        throw execError;
+      } finally {
+        dbActiveQueries.delete(queryKey);
+      }
     } catch (error) {
       return { ok: false, error: dbRedactError(error) };
     }
@@ -1803,7 +2017,7 @@ function registerDatabaseHandlers() {
 
       if (options.outputPath) {
         const target = String(options.outputPath);
-        if (options.root && !isInside(options.root, target)) {
+        if (options.root && !isInside(target, options.root)) {
           return { ok: false, error: "Export path is outside workspace root." };
         }
         await writeFileAtomic(target, content, "utf8");
@@ -1813,6 +2027,13 @@ function registerDatabaseHandlers() {
     } catch (error) {
       return { ok: false, error: dbRedactError(error) };
     }
+  });
+
+  electron.ipcMain.handle("db:cancel", async (_event, queryKey) => {
+    const active = dbActiveQueries.get(String(queryKey || ""));
+    if (!active) return { ok: false };
+    active.cancel();
+    return { ok: true };
   });
 
   electron.ipcMain.handle("db:audit", async (_event, id) => {
@@ -1829,13 +2050,13 @@ function registerDatabaseHandlers() {
     try {
       if (!root) return { ok: true, queries: [] };
       const dir = dbQueriesDir(String(root));
-      if (!exists(dir)) return { ok: true, queries: [] };
+      if (!(await exists(dir))) return { ok: true, queries: [] };
       const entries = await promises.readdir(dir, { withFileTypes: true });
       const queries = [];
       for (const entry of entries) {
         if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".sql")) continue;
         const full = node_path.join(dir, entry.name);
-        if (!isInside(root, full)) continue;
+        if (!isInside(full, root)) continue;
         const [sql, stat] = await Promise.all([promises.readFile(full, "utf8"), promises.stat(full)]);
         queries.push({
           name: entry.name.replace(/\.sql$/i, ""),
@@ -1858,12 +2079,40 @@ function registerDatabaseHandlers() {
       const clean = dbSanitizeQueryName(name);
       const dir = dbQueriesDir(String(root));
       const full = node_path.join(dir, `${clean}.sql`);
-      if (!isInside(root, full)) return { ok: false, error: "Target query path escapes workspace root." };
+      if (!isInside(full, root)) return { ok: false, error: "Target query path escapes workspace root." };
       await writeFileAtomic(full, String(sql || ""), "utf8");
       return { ok: true, path: full, name: clean };
     } catch (error) {
       return { ok: false, error: dbRedactError(error) };
     }
+  });
+
+  electron.ipcMain.handle("db:listHistory", async (_event, connectionId) => {
+    try {
+      const all = await dbReadHistory();
+      const cid = String(connectionId || "").trim();
+      const history = cid ? all.filter((item) => item && item.connectionId === cid) : all;
+      return { ok: true, history };
+    } catch (error) {
+      return { ok: false, error: dbRedactError(error) };
+    }
+  });
+
+  electron.ipcMain.handle("db:clearHistory", async (_event, connectionId) => {
+    return dbHistoryChain = dbHistoryChain.then(async () => {
+      try {
+        const cid = String(connectionId || "").trim();
+        if (!cid) {
+          await dbWriteHistory([]);
+        } else {
+          const all = await dbReadHistory();
+          await dbWriteHistory(all.filter((item) => item && item.connectionId !== cid));
+        }
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: dbRedactError(error) };
+      }
+    });
   });
 
   electron.ipcMain.handle("db:redisCommand", async (_event, id, action, params = {}) => {

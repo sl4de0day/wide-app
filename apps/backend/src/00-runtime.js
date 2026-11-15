@@ -7,15 +7,19 @@ const promises = require("node:fs/promises");
 const node_fs = require("node:fs");
 const node_child_process = require("node:child_process");
 const node_util = require("node:util");
-const ts = require("typescript");
 const node_crypto = require("node:crypto");
 const node_os = require("node:os");
 
-let nodePty = null;
-try {
-  nodePty = require("@lydell/node-pty");
-} catch {
-
+let nodePtyLoaded = false;
+let nodePtyCache = null;
+function getNodePty() {
+  if (!nodePtyLoaded) {
+    nodePtyLoaded = true;
+    try {
+      nodePtyCache = require("@lydell/node-pty");
+    } catch {}
+  }
+  return nodePtyCache;
 }
 const node_http = require("node:http");
 const node_https = require("node:https");
@@ -44,7 +48,11 @@ function killProcessTree(child) {
   }
 }
 
-const prettier = require("prettier");
+let prettierCache = null;
+function getPrettier() {
+  if (!prettierCache) prettierCache = require("prettier");
+  return prettierCache;
+}
 const protocol = require("./chunks/protocol.js");
 const IGNORED$3 =  new Set(["node_modules", ".git", "dist", "out", ".DS_Store"]);
 const MAX_FILE_BYTES$1 = 4 * 1024 * 1024;

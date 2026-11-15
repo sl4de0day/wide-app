@@ -30,6 +30,11 @@ function afterRedirect(status, method, headers, body) {
 
 function sendOnce(target, method, headers, body, redirectsLeft, options) {
   return new Promise((resolve) => {
+    const signal = options && options.signal;
+    if (signal && signal.aborted) {
+      resolve({ ok: false, error: "Request cancelled." });
+      return;
+    }
     let url;
     try {
       url = new URL(target);
@@ -59,11 +64,34 @@ function sendOnce(target, method, headers, body, redirectsLeft, options) {
       targetArg = requestOptions;
     }
 
-    const request = transport.request(
+    let settled = false;
+    let request = null;
+    const onAbort = () => {
+      if (request) {
+        try {
+          request.destroy(new Error("Request cancelled."));
+        } catch {
+          void 0;
+        }
+      }
+      finish({ ok: false, error: "Request cancelled." });
+    };
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (signal && typeof signal.removeEventListener === "function") {
+        signal.removeEventListener("abort", onAbort);
+      }
+      resolve(result);
+    };
+    if (signal && typeof signal.addEventListener === "function") {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    request = transport.request(
       targetArg,
       requestOptions,
       (response) => {
-
         const location = response.headers.location;
         if (
           location &&
@@ -73,9 +101,8 @@ function sendOnce(target, method, headers, body, redirectsLeft, options) {
         ) {
           response.resume();
           const next = new URL(location, url).toString();
-
           const after = afterRedirect(response.statusCode, method, headers, body);
-          resolve(sendOnce(next, after.method, after.headers, after.body, redirectsLeft - 1, options));
+          finish(sendOnce(next, after.method, after.headers, after.body, redirectsLeft - 1, options));
           return;
         }
 
@@ -92,15 +119,17 @@ function sendOnce(target, method, headers, body, redirectsLeft, options) {
           chunks.push(chunk);
         });
         response.on("close", () => {
-
+          if (signal && signal.aborted) {
+            finish({ ok: false, error: "Request cancelled." });
+            return;
+          }
           if (!response.complete && !truncated) {
-            resolve({ ok: false, error: "The connection closed before the response finished." });
+            finish({ ok: false, error: "The connection closed before the response finished." });
             return;
           }
           const raw = Buffer.concat(chunks);
-
           const decoded = truncated ? raw : decodeBody(raw, response.headers["content-encoding"]);
-          resolve({
+          finish({
             ok: true,
             status: response.statusCode,
             statusText: response.statusMessage ?? "",
@@ -120,9 +149,9 @@ function sendOnce(target, method, headers, body, redirectsLeft, options) {
 
     request.setTimeout(HTTP_TIMEOUT_MS, () => {
       request.destroy();
-      resolve({ ok: false, error: `No answer within ${HTTP_TIMEOUT_MS / 1000}s.` });
+      finish({ ok: false, error: `No answer within ${HTTP_TIMEOUT_MS / 1000}s.` });
     });
-    request.on("error", (error) => resolve({ ok: false, error: error.message }));
+    request.on("error", (error) => finish({ ok: false, error: error.message }));
     if (body != null && body !== "") {
       request.write(options && options.bodyBase64 ? Buffer.from(body, "base64") : body);
     }

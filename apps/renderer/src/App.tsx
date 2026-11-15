@@ -1,35 +1,23 @@
 import { ChevronLeft, Database, Settings, ShieldAlert, X } from "lucide-react";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { AiChatView } from "./components/AiChatView";
 import { AiPanel } from "./panels/AiPanel";
-import { DatabaseView } from "./components/DatabaseView";
-import { DatabasePanel } from "./panels/DatabasePanel";
 
-import { ActivityBar, panelById } from "./components/ActivityBar";
-import { EditorArea } from "./components/EditorArea";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { Launcher } from "./components/Launcher";
-import { CodeActionMenu } from "./components/CodeActionMenu";
-import { RenameOverlay } from "./components/RenameOverlay";
-import { SymbolSearchOverlay } from "./components/SymbolSearchOverlay";
-import { QuickOpenOverlay } from "./components/QuickOpenOverlay";
+const AiChatView = lazy(() => import("./components/AiChatView").then((m) => ({ default: m.AiChatView })));
+const DatabaseView = lazy(() => import("./components/DatabaseView").then((m) => ({ default: m.DatabaseView })));
+const DatabasePanel = lazy(() => import("./panels/DatabasePanel").then((m) => ({ default: m.DatabasePanel })));
+const SettingsView = lazy(() => import("./components/SettingsView").then((m) => ({ default: m.SettingsView })));
 import { CommandPalette } from "./components/CommandPalette";
-import { DecoderOverlay } from "./components/DecoderOverlay";
-import { TabSwitcherOverlay } from "./components/TabSwitcherOverlay";
 import { useTabSwitcher } from "./stores/tabSwitcher";
 import { RecentProjectsOverlay } from "./components/RecentProjectsOverlay";
 import { useRecentProjects } from "./stores/recentProjects";
-import { TransformModal } from "./components/TransformModal";
 import { useTransformModal } from "./stores/transform";
 import { transformSelection } from "./lib/transformSelection";
 import { base64Decode, base64Encode, hexDecode, hexEncode, htmlDecode, htmlEncode, md5Hex, urlDecode, urlEncode } from "./lib/codec";
 import { useDecoder } from "./stores/decoder";
-import { ComparerOverlay } from "./components/ComparerOverlay";
 import { useComparer } from "./stores/comparer";
 import { useCatcher } from "./stores/catcher";
-import { MacrosOverlay } from "./components/MacrosOverlay";
 import { useMacros } from "./stores/macros";
 import { subscribeProjectScan, useProjectScan } from "./stores/projectScan";
 import { AiEditsOverlay } from "./components/AiEditsOverlay";
@@ -38,9 +26,6 @@ import { useAiEdits } from "./stores/aiEdits";
 import { sendSelectionToChat } from "./lib/sendToChat";
 import { selectedText } from "./editor/activeView";
 import { copyConversation, exportConversation } from "./lib/chatExport";
-import { BottomDock, SidePanel } from "./components/SidePanel";
-import { SettingsView } from "./components/SettingsView";
-import { StatusBar } from "./components/StatusBar";
 import { TitleBar } from "./components/TitleBar";
 import { bridge } from "./lib/bridge";
 import { requestCloseAll, requestCloseOthers, requestCloseTab } from "./lib/tabClose";
@@ -54,12 +39,11 @@ import { AiBrowserDrawer } from "./components/AiBrowserDrawer";
 import { useAiBrowser } from "./stores/aiBrowser";
 import { useTelemetry } from "./stores/telemetry";
 import { useDiagnostics } from "./stores/diagnostics";
-import { subscribeFindingsProject, useFindings } from "./stores/findings";
+import { subscribeFindingsProject } from "./stores/findings";
 import { AI_CHAT_PATH, DATABASE_PATH, SETTINGS_PATH, useEditor } from "./stores/editor";
 import { subscribeAiEvents, subscribeAiPulls, useAi } from "./stores/ai";
 import { subscribeProxyTraffic } from "./stores/proxy";
 import { subscribeOast } from "./stores/oast";
-import { subscribeDebugEvents } from "./stores/debug";
 import { subscribeDiscordPresence } from "./stores/discordPresence";
 import { useExtensions } from "./stores/extensions";
 import { useSession } from "./stores/session";
@@ -71,16 +55,10 @@ import { resetLspState, subscribeLspDiagnostics } from "./editor/features/lsp";
 import { parseProjectRules, parseSecurityConfig, setProjectRules, setSecurityConfig } from "./editor/features/inspect/engine";
 import { forgetTailwindTheme } from "./editor/features/tailwind";
 import { applyLanguage, isLanguage, useT } from "./lib/i18n";
-import { installCatcherSession } from "./lib/catcherSession";
-import { forgetLastFile, recallLastFile, rememberLastFile } from "./lib/lastFile";
 import { applySyntaxPalette, applyTheme, hasStoredLanguage, hydrateSettingsFromDisk, useSettings } from "./stores/settings";
 import { useUpdate } from "./stores/update";
 import { subscribeFsChanges, useWorkspace } from "./stores/workspace";
 import logo from "./assets/wide-logo.png";
-
-
-const KEEP_ALIVE = new Set(["terminal"]);
-
 
 
 function RemoteFallbackNotice() {
@@ -150,33 +128,6 @@ function SssfDegradedNotice() {
 
 
 
-function addSecurityFindingsForActiveFile(): number {
-  const editor = useEditor.getState();
-  const path = editor.lastFilePath;
-  if (!path) return 0;
-  const tab = editor.tabs.find((item) => item.path === path);
-  if (!tab || tab.kind !== "file") return 0;
-  const diagnostics = useDiagnostics.getState().bySource[path]?.security ?? [];
-  if (diagnostics.length === 0) return 0;
-
-  const lineFor = (from: number): number => {
-    let line = 1;
-    for (let i = 0; i < Math.min(from, tab.content.length); i += 1) if (tab.content[i] === "\n") line += 1;
-    return line;
-  };
-  const severityOf = { error: "high", warning: "medium", info: "low", hint: "low" } as const;
-  const add = useFindings.getState().add;
-  for (const diagnostic of diagnostics) {
-    add({
-      title: diagnostic.message.split("\n")[0],
-      severity: severityOf[diagnostic.severity] ?? "low",
-      location: `${path}:${lineFor(diagnostic.from)}`,
-      detail: diagnostic.message,
-    });
-  }
-  return diagnostics.length;
-}
-
 function BootGate() {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas">
@@ -186,13 +137,6 @@ function BootGate() {
 }
 
 export default function App() {
-
-
-  const [activeSide, setActiveSide] = useState<string | null>("project");
-  const [activeBottom, setActiveBottom] = useState<string | null>(null);
-
-  const [mounted, setMounted] = useState<Set<string>>(() => new Set(["project"]));
-
   const saveActive = useEditor((state) => state.saveActive);
   const formatActive = useEditor((state) => state.formatActive);
   const openFolder = useWorkspace((state) => state.openFolder);
@@ -205,14 +149,6 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState<"ai" | "db">("ai");
   const booting = useUpdate((state) => state.booting);
 
-
-
-
-  const hasFileTab = useEditor((state) =>
-    state.tabs.some(
-      (tab) => tab.kind === "file" || tab.kind === "catcher" || tab.kind === "pitcher" || tab.kind === "browser" || tab.kind === "scratchpad",
-    ),
-  );
   const closeTab = useEditor((state) => state.closeTab);
   const t = useT();
 
@@ -286,13 +222,8 @@ export default function App() {
           switcher.open();
         }
       } else if (event.altKey && event.shiftKey && key === "f") {
-
-
         event.preventDefault();
         void formatActive();
-      } else if (event.shiftKey && key === "f") {
-        event.preventDefault();
-        openPanel("search");
       } else if (key === "r" && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         useRecentProjects.getState().open();
@@ -442,29 +373,8 @@ export default function App() {
     void useAi.getState().load();
   }, []);
 
-  const sessions = useAi((state) => state.sessions);
   const activeTab = useEditor((state) => state.tabs.find((t) => t.path === state.activePath));
   const activeAiChatId = activeTab?.kind === "ai-chat" ? activeTab.path.slice(AI_CHAT_PATH.length) : null;
-
-
-
-  const installedExtensions = useExtensions((state) => state.installed);
-  useEffect(() => {
-    const orphans = [...mounted].filter((id) => {
-      const owner = panelById(id)?.extension;
-      return owner && !installedExtensions.has(owner);
-    });
-    if (orphans.length === 0) return;
-    setMounted((current) => {
-      const next = new Set(current);
-      for (const id of orphans) next.delete(id);
-      return next;
-    });
-
-
-    setActiveSide((current) => (current && orphans.includes(current) ? null : current));
-    setActiveBottom((current) => (current && orphans.includes(current) ? null : current));
-  }, [installedExtensions, mounted]);
 
 
 
@@ -478,7 +388,6 @@ export default function App() {
 
   useEffect(() => subscribeProxyTraffic(), []);
   useEffect(() => subscribeOast(), []);
-  useEffect(() => subscribeDebugEvents(), []);
 
   useEffect(() => subscribeFsChanges(), []);
 
@@ -550,28 +459,15 @@ export default function App() {
 
 
   const fontSize = useSettings((state) => state.fontSize);
-  const language = useSettings((state) => state.language);
   useEffect(() => {
     document.documentElement.style.setProperty("--editor-font-size", `${fontSize}px`);
   }, [fontSize]);
 
-  const isBottom = (id: string) => panelById(id)?.place === "bottom";
-  const isActive = (id: string) => (isBottom(id) ? activeBottom : activeSide) === id;
-
-  const togglePanel = (id: string) => {
-    setMounted((current) => (current.has(id) ? current : new Set(current).add(id)));
-    const set = isBottom(id) ? setActiveBottom : setActiveSide;
-    set((current) => (current === id ? null : id));
-  };
-  const openPanel = (id: string) => {
-    setMounted((current) => (current.has(id) ? current : new Set(current).add(id)));
-    (isBottom(id) ? setActiveBottom : setActiveSide)(id);
-  };
-
   useEffect(() => {
     const handleOpenPanel = (e: Event) => {
       const panelId = (e as CustomEvent<string>).detail;
-      if (panelId) openPanel(panelId);
+      if (panelId === "db" || panelId === "database") setSidebarTab("db");
+      else if (panelId === "ai") setSidebarTab("ai");
     };
     window.addEventListener("wide:open-panel", handleOpenPanel);
     return () => window.removeEventListener("wide:open-panel", handleOpenPanel);
@@ -580,8 +476,7 @@ export default function App() {
 
 
   useEffect(() => {
-    const installed = useExtensions.getState().installed;
-    const has = (id: string) => installed.has(id);
+    const has = (id: string) => useExtensions.getState().installed.has(id);
     const hasRoot = () => Boolean(useWorkspace.getState().root);
     useCommandPalette.getState().register([
       { id: "file.save", title: "Save", group: "File", key: "ctrl+s", run: () => void useEditor.getState().saveActive() },
@@ -624,16 +519,7 @@ export default function App() {
       { id: "tool.comparer", title: "Comparer", group: "Tools", run: () => useComparer.getState().openComparer() },
       { id: "catcher.intruder", title: "Catcher: Intruder", group: "Catcher", run: () => useCatcher.getState().show("intruder") },
       { id: "tool.macros", title: "Session macros", group: "Tools", run: () => useMacros.getState().openMacros() },
-      { id: "view.explorer", title: "Explorer", group: "View", run: () => openPanel("project") },
-      { id: "view.search", title: "Search", group: "View", key: "ctrl+shift+f", run: () => openPanel("search") },
-      { id: "view.structure", title: "Structure", group: "View", run: () => openPanel("structure") },
-      { id: "view.problems", title: "Problems", group: "View", run: () => openPanel("problems") },
-      { id: "view.terminal", title: "Terminal", group: "View", run: () => openPanel("terminal") },
-      { id: "view.build", title: "Build", group: "View", run: () => openPanel("build") },
-      { id: "view.extensions", title: "Extensions", group: "View", run: () => openPanel("tools") },
-      { id: "view.debug", title: "Debug", group: "View", run: () => openPanel("debug") },
-      { id: "view.scm", title: "Source Control", group: "View", when: () => has("codeberg") || has("github"), run: () => openPanel(has("codeberg") ? "codeberg" : "github") },
-      { id: "view.ai", title: "AI Assistant", group: "View", when: () => has("ai-assistant"), run: () => openPanel("ai") },
+      { id: "view.ai", title: "AI Assistant", group: "View", when: () => has("ai-assistant"), run: () => setSidebarTab("ai") },
       { id: "ai.newChat", title: "New AI conversation", group: "AI", key: "ctrl+l", when: () => has("ai-assistant"), run: async () => { const newId = await useAi.getState().newSession(); if (newId) useEditor.getState().openAiChat(newId, t("New conversation")); } },
       { id: "ai.review", title: "Toggle: Review AI edits before applying", group: "AI", when: () => has("ai-assistant"), run: () => useAiEdits.getState().setReview(!useAiEdits.getState().reviewEnabled) },
       { id: "ai.ghost", title: "Toggle: Inline AI completions (ghost text)", group: "AI", when: () => has("ai-assistant"), run: () => useSettings.getState().set({ aiGhostText: !useSettings.getState().aiGhostText }) },
@@ -658,8 +544,7 @@ export default function App() {
           else toast.info("Streamer mode disabled");
         },
       },
-      { id: "security.toFindings", title: "Add this file's security issues to Findings", group: "Security", run: () => { if (addSecurityFindingsForActiveFile() > 0) openPanel("findings"); } },
-      { id: "security.projectScan", title: "Scan project for cross-file vulnerabilities", group: "Security", when: hasRoot, run: () => { void useProjectScan.getState().run(); openPanel("problems"); } },
+      { id: "security.projectScan", title: "Scan project for cross-file vulnerabilities", group: "Security", when: hasRoot, run: () => void useProjectScan.getState().run() },
       { id: "view.catcher", title: "Catcher", group: "View", run: () => useEditor.getState().openCatcher() },
       { id: "view.pitcher", title: "Pitcher", group: "View", run: () => useEditor.getState().openPitcher() },
       { id: "view.browser", title: "Browser", group: "View", run: () => useEditor.getState().openBrowser() },
@@ -668,38 +553,8 @@ export default function App() {
       { id: "catcher.proxy", title: "Catcher: Proxy", group: "Catcher", run: () => useCatcher.getState().show("proxy") },
       { id: "catcher.target", title: "Catcher: Target (Site Map)", group: "Catcher", run: () => useCatcher.getState().show("target") },
       { id: "catcher.repeater", title: "Catcher: Repeater", group: "Catcher", run: () => useCatcher.getState().show("repeater") },
-      { id: "view.findings", title: "Findings", group: "View", run: () => openPanel("findings") },
     ]);
-
-
-
-  }, [installedExtensions]);
-
-
-
-  const hasBottomPanels = [...mounted].some((id) => panelById(id)?.place === "bottom");
-
-  const panelsFor = (place: "top" | "bottom", active: string | null) =>
-    [...mounted]
-      .filter((id) => panelById(id)?.place === place)
-      .filter((id) => id === active || KEEP_ALIVE.has(id))
-      .map((id) => {
-        const Body = panelById(id)?.component;
-        if (!Body) return null;
-        return (
-          <div key={id} className={cn("h-full", id !== active && "hidden")}>
-            <ErrorBoundary>
-              <Suspense fallback={null}>
-                <Body onOpenPanel={openPanel} />
-              </Suspense>
-            </ErrorBoundary>
-          </div>
-        );
-      });
-
-
-
-
+  }, [t]);
 
   if (booting) return <BootGate />;
 
@@ -734,7 +589,13 @@ export default function App() {
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            {sidebarTab === "db" ? <DatabasePanel /> : <AiPanel />}
+            {sidebarTab === "db" ? (
+              <Suspense fallback={null}>
+                <DatabasePanel />
+              </Suspense>
+            ) : (
+              <AiPanel />
+            )}
           </div>
           <div className="flex shrink-0 items-center border-t border-line px-3 py-2 bg-chrome">
             <button
@@ -768,7 +629,9 @@ export default function App() {
                 </button>
               </div>
               <div className="min-h-0 flex-1">
+              <Suspense fallback={null}>
                 <SettingsView />
+              </Suspense>
               </div>
             </div>
           ) : databaseOpen ? (
@@ -790,11 +653,15 @@ export default function App() {
                 </button>
               </div>
               <div className="min-h-0 flex-1">
+              <Suspense fallback={null}>
                 <DatabaseView />
+              </Suspense>
               </div>
             </div>
           ) : activeAiChatId ? (
-            <AiChatView key={activeAiChatId} id={activeAiChatId} />
+            <Suspense fallback={null}>
+              <AiChatView key={activeAiChatId} id={activeAiChatId} />
+            </Suspense>
           ) : (
             <div className="flex h-full items-center justify-center text-fg-dim">
               <div className="text-center">

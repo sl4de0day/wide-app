@@ -519,6 +519,7 @@ const AI_TOOLS = [
         waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle"], description: "Navigation wait mode." },
         clearSession: { type: "boolean", description: "Reset cookies/storage before opening." },
         bypassProxy: { type: "boolean", description: "Bypass Catcher proxy even if running." },
+        stealth: { type: "boolean", description: "Opt-in stealth evasion mode masking navigator.webdriver and headless signals." },
       },
       required: [],
     },
@@ -728,6 +729,20 @@ const AI_TOOLS = [
       type: "object",
       properties: {
         fullPage: { type: "boolean", description: "Capture full scrollable page instead of current viewport." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "browser_export_har",
+    category: "browser",
+    description:
+      "Export recorded live browser network traffic in HAR 1.2 JSON format (with sensitive Auth/Cookie headers redacted).",
+    parameters: {
+      type: "object",
+      properties: {
+        urlFilter: { type: "string", description: "Optional substring to filter recorded request URLs." },
+        limit: { type: "number", description: "Maximum number of HAR entries to return (default 100)." },
       },
       required: [],
     },
@@ -1214,23 +1229,29 @@ function aiGetToolCatalog(allowWrites = true) {
 
 const aiPendingPermissions = new Map();
 
-function aiRequestPermission(send, { title, detail, command = "", tool = "" }) {
+function aiRequestPermission(send, { title, detail, command = "", tool = "", signal = null }) {
   if (typeof send !== "function") return Promise.resolve({ allowed: false, reason: "Interactive confirmation unavailable." });
+  if (signal?.aborted) return Promise.resolve({ allowed: false, reason: "Turn stopped." });
   const requestId = `perm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (decision) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      aiPendingPermissions.delete(requestId);
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+      resolve(decision);
+    };
+    const onAbort = signal ? () => finish({ allowed: false, reason: "Turn stopped." }) : null;
     const timer = setTimeout(() => {
-      if (aiPendingPermissions.delete(requestId)) {
-        resolve({ allowed: false, reason: "Confirmation timed out after 5 minutes." });
-      }
+      finish({ allowed: false, reason: "Confirmation timed out after 5 minutes." });
     }, 5 * 60 * 1000);
     timer.unref?.();
+    if (signal && onAbort) signal.addEventListener("abort", onAbort, { once: true });
 
     aiPendingPermissions.set(requestId, {
-      resolve: (decision) => {
-        clearTimeout(timer);
-        aiPendingPermissions.delete(requestId);
-        resolve(decision);
-      },
+      resolve: finish,
     });
 
     try {
@@ -1243,9 +1264,7 @@ function aiRequestPermission(send, { title, detail, command = "", tool = "" }) {
         tool: String(tool || ""),
       });
     } catch {
-      clearTimeout(timer);
-      aiPendingPermissions.delete(requestId);
-      resolve({ allowed: false, reason: "Could not deliver confirmation prompt to UI." });
+      finish({ allowed: false, reason: "Could not deliver confirmation prompt to UI." });
     }
   });
 }

@@ -158,6 +158,8 @@ interface DatabaseState {
 
   runQuery(options?: { sql?: string; explain?: boolean; allowDangerous?: boolean }): Promise<void>;
   dismissDangerousPrompt(): void;
+  loadHistory(connectionId?: string): Promise<void>;
+  clearHistory(connectionId?: string): Promise<void>;
   loadSavedQueries(): Promise<void>;
   saveCurrentQuery(name: string): Promise<boolean>;
 
@@ -248,6 +250,7 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
           activeConnectionId: stillExists ? current : res.connections[0]?.id ?? null,
         });
       }
+      await get().loadHistory();
     } finally {
       set({ loadingConnections: false });
     }
@@ -500,6 +503,7 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
           return;
         }
         set({ queryError: res.error || "Query failed." });
+        void get().loadHistory();
         return;
       }
       if (res.result) {
@@ -518,6 +522,7 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
             ...state.history.slice(0, 49),
           ],
         }));
+        void get().loadHistory();
       }
     } finally {
       set({ queryRunning: false });
@@ -525,6 +530,26 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
   },
 
   dismissDangerousPrompt: () => set({ dangerousPrompt: null }),
+
+  loadHistory: async (connectionId) => {
+    const res = await bridge.dbListHistory(connectionId);
+    if (res.ok && Array.isArray(res.history)) {
+      set({ history: res.history });
+    }
+  },
+
+  clearHistory: async (connectionId) => {
+    const res = await bridge.dbClearHistory(connectionId);
+    if (!res.ok) {
+      toast.error(res.error || "Failed to clear query history.");
+      return;
+    }
+    if (!connectionId) {
+      set({ history: [] });
+    } else {
+      set((state) => ({ history: state.history.filter((item) => item.connectionId !== connectionId) }));
+    }
+  },
 
   loadSavedQueries: async () => {
     const root = useWorkspace.getState().root;

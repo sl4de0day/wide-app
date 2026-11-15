@@ -466,7 +466,7 @@ function stopWatching() {
   watcher = null;
 }
 
-function startWatching(served, onChange) {
+function perfStartWatching(served, onChange) {
   stopWatching();
   try {
 

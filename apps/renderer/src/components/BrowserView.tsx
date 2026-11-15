@@ -41,10 +41,23 @@ const faviconScript = (url: string) => `(async () => {
   }
 })()`;
 
+const MAX_FAVICONS = 200;
+
+function rememberFavicon(url: string, href: string): void {
+  if (faviconCache.has(url)) faviconCache.delete(url);
+  else if (faviconCache.size >= MAX_FAVICONS) {
+    const oldest = faviconCache.keys().next().value;
+    if (oldest !== undefined) faviconCache.delete(oldest);
+  }
+  faviconCache.set(url, href);
+}
+
 function resolveFavicon(tabId: string, url: string): void {
   if (!tabId || !/^https?:\/\//i.test(url)) return;
   const cached = faviconCache.get(url);
   if (cached) {
+    faviconCache.delete(url);
+    faviconCache.set(url, cached);
     useBrowser.getState().ingest({ tabId, favicon: cached });
     return;
   }
@@ -57,8 +70,7 @@ function resolveFavicon(tabId: string, url: string): void {
       if (!reply.ok) return;
       const value = (reply.result as { result?: { value?: string } } | undefined)?.result?.value;
       if (typeof value !== "string" || !value) return;
-      if (faviconCache.size > 200) faviconCache.clear();
-      faviconCache.set(url, value);
+      rememberFavicon(url, value);
       useBrowser.getState().ingest({ tabId, favicon: value });
     })
     .catch(() => faviconPending.delete(url));
@@ -238,6 +250,14 @@ export function BrowserView() {
     };
 
   }, []);
+
+  useEffect(() => {
+    place();
+    if (!devtoolsOpen || !devtoolsSurface.current) return;
+    const observer = new ResizeObserver(() => place());
+    observer.observe(devtoolsSurface.current);
+    return () => observer.disconnect();
+  }, [devtoolsOpen]);
 
   useEffect(() => {
     return bridge.onBrowserEvent((event) => {

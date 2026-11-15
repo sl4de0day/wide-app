@@ -61,7 +61,8 @@ function disposeSession(id) {
 }
 function registerTerminalHandlers() {
   electron.ipcMain.handle("terminal:start", (event, options) => {
-    if (!nodePty) return { error: "The terminal is not available here (no pty for this platform)." };
+    const pty = getNodePty();
+    if (!pty) return { error: "The terminal is not available here (no pty for this platform)." };
     const requested = options?.cwd || process.cwd();
     let file, args, shellCwd, label;
     const container = options?.container;
@@ -89,7 +90,7 @@ function registerTerminalHandlers() {
     const id = nextId++;
     let child;
     try {
-      child = nodePty.spawn(file, args, {
+      child = pty.spawn(file, args, {
         name: "xterm-256color",
         cols: options?.cols ?? 80,
         rows: options?.rows ?? 24,

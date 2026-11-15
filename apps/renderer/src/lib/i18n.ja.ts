@@ -1951,4 +1951,13 @@ export const JA: Record<string, string> = {
   "Update & Restart": "更新して再起動",
   "Wide App checks for updates on startup and installs them automatically from GitHub.": "Wide App は起動時に更新を確認し、GitHub から自動的にインストールします。",
   "Wide IDE opened": "Wide IDE を開きました",
+  "Clear History": "履歴をクリア",
+  "Copied Mermaid ERD diagram.": "Mermaid ERD 図をコピーしました。",
+  "Copy Mermaid": "Mermaid をコピー",
+  "Could not copy Mermaid diagram.": "Mermaid 図をコピーできませんでした。",
+  "A crash was detected from the previous session": "前回のセッションでクラッシュが検出されました",
+  "It appears {app} encountered an unexpected error and closed. You can help improve stability by submitting this anonymous report.": "{app} で予期しないエラーが発生して終了したようです。この匿名レポートを送信することで安定性の向上にご協力いただけます。",
+  "Type: {kind}": "種類: {kind}",
+  "Sending...": "送信中...",
+  "Send Report": "レポートを送信",
 };

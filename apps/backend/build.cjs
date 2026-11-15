@@ -21,12 +21,49 @@ const parts = files.map((name) => {
   const text = fs.readFileSync(path.join(SRC, name), 'utf8');
 
   const body = text.replace(/^\/\* [^\n]*\n[^\n]*\*\/\n/, '');
-  return body.replace(/\n+$/, '');
+  return { name, code: body.replace(/\n+$/, '') };
 });
+
+function collectTopLevelDeclarations(name, source) {
+  const ts = require('typescript');
+  const sf = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.JS);
+  const decls = [];
+  const collectBinding = (node) => {
+    if (!node) return;
+    if (ts.isIdentifier(node)) {
+      decls.push(node.text);
+      return;
+    }
+    if (ts.isObjectBindingPattern(node) || ts.isArrayBindingPattern(node)) {
+      for (const el of node.elements) {
+        if (ts.isBindingElement(el)) collectBinding(el.name);
+      }
+    }
+  };
+  for (const stmt of sf.statements) {
+    if ((ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt)) && stmt.name) {
+      decls.push(stmt.name.text);
+    } else if (ts.isVariableStatement(stmt)) {
+      for (const decl of stmt.declarationList.declarations) collectBinding(decl.name);
+    }
+  }
+  return decls;
+}
+
+const seenDecls = new Map();
+for (const part of parts) {
+  for (const sym of collectTopLevelDeclarations(part.name, part.code)) {
+    const prev = seenDecls.get(sym);
+    if (prev && prev !== part.name) {
+      throw new Error(`Duplicate top-level backend symbol "${sym}" across ${prev} and ${part.name}`);
+    }
+    if (!prev) seenDecls.set(sym, part.name);
+  }
+}
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.cpSync(RUNTIME, path.dirname(OUT), { recursive: true });
-fs.writeFileSync(OUT, `${parts.join('\n')}\n`, 'utf8');
+fs.writeFileSync(OUT, `${parts.map((p) => p.code).join('\n')}\n`, 'utf8');
 
 const esbuild = require('esbuild');
 const rootDir = path.resolve(__dirname, '..', '..');

@@ -225,6 +225,9 @@ export function IntruderView() {
   const [rangeFrom, setRangeFrom] = useState("0");
   const [rangeTo, setRangeTo] = useState("100");
   const stop = useRef(false);
+  useEffect(() => () => {
+    stop.current = true;
+  }, []);
 
   const pendingRows = useRef<Row[]>([]);
   const pendingDone = useRef(0);

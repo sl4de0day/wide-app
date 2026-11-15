@@ -93,10 +93,16 @@ let sessionStartTimestamp = Math.floor(Date.now() / 1000);
 let lastWorkspace: string | null = null;
 
 export function subscribeDiscordPresence(): () => void {
-  const updatePresence = () => {
+  let lastSignature = "";
+  let editorTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const updatePresence = (force = false) => {
     const installed = useExtensions.getState().installed.has("discord-presence");
     if (!installed) {
-      void bridge.discordClear();
+      if (lastSignature) {
+        lastSignature = "";
+        void bridge.discordClear();
+      }
       return;
     }
 
@@ -160,6 +166,9 @@ export function subscribeDiscordPresence(): () => void {
     }
 
     const state = rootName ? `Workspace: ${rootName}` : "No Workspace Open";
+    const signature = `${details}\0${state}\0${smallImage ?? ""}\0${smallText ?? ""}`;
+    if (!force && signature === lastSignature) return;
+    lastSignature = signature;
 
     const activity: DiscordActivity = {
       details,
@@ -178,24 +187,36 @@ export function subscribeDiscordPresence(): () => void {
     const wasInstalled = prevState.installed.has("discord-presence");
     const isInstalled = state.installed.has("discord-presence");
     if (wasInstalled !== isInstalled) {
-      updatePresence();
+      updatePresence(true);
     }
   });
 
-  const unsubWorkspace = useWorkspace.subscribe(() => {
+  const unsubWorkspace = useWorkspace.subscribe((state, prev) => {
+    if (state.root === prev.root && state.rootName === prev.rootName) return;
+    if (editorTimer) {
+      clearTimeout(editorTimer);
+      editorTimer = null;
+    }
     updatePresence();
   });
 
-  const unsubEditor = useEditor.subscribe(() => {
-    updatePresence();
+  const unsubEditor = useEditor.subscribe((state, prev) => {
+    if (state.activePath === prev.activePath) return;
+    if (editorTimer) clearTimeout(editorTimer);
+    editorTimer = setTimeout(() => {
+      editorTimer = null;
+      updatePresence();
+    }, 2000);
   });
 
-  updatePresence();
+  updatePresence(true);
 
   return () => {
+    if (editorTimer) clearTimeout(editorTimer);
     unsubExtensions();
     unsubWorkspace();
     unsubEditor();
+    lastSignature = "";
     void bridge.discordClear();
   };
 }

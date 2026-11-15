@@ -24,7 +24,7 @@ const EXTERNAL_FORMATTERS = {
 
 async function prettierParserFor(filePath) {
   try {
-    const info = await prettier.getFileInfo(filePath, { resolveConfig: false });
+    const info = await getPrettier().getFileInfo(filePath, { resolveConfig: false });
     return info.inferredParser ?? null;
   } catch {
     return null;
@@ -37,12 +37,12 @@ async function formatWithPrettier(filePath, text) {
 
   let options = {};
   try {
-    options = (await prettier.resolveConfig(filePath)) ?? {};
+    options = (await getPrettier().resolveConfig(filePath)) ?? {};
   } catch (error) {
     return { ok: false, error: `The Prettier config could not be read: ${error.message}` };
   }
   try {
-    const formatted = await prettier.format(text, { ...options, filepath: filePath, parser });
+    const formatted = await getPrettier().format(text, { ...options, filepath: filePath, parser });
     return { ok: true, text: formatted, formatter: `prettier (${parser})` };
   } catch (error) {
 

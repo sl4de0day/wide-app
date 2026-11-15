@@ -140,7 +140,7 @@ function aiMessagesToSdk(messages) {
   return out;
 }
 
-function aiBuildSdkToolSet({ root, allowWrites, send, latestUserText, tracker }) {
+function aiBuildSdkToolSet({ root, allowWrites, send, latestUserText, tracker, signal = null }) {
   const sdk = aiLoadSdkVendor();
   const catalog = aiGetToolCatalog(allowWrites);
   const mcpList = typeof mcpToolSpecs === "function" ? mcpToolSpecs() : [];
@@ -163,7 +163,8 @@ function aiBuildSdkToolSet({ root, allowWrites, send, latestUserText, tracker })
         }
         let result;
         try {
-          result = await aiRunTool(root, norm.name, norm.input ?? {}, send, allowWrites, latestUserText);
+          const toolSignal = execOptions?.abortSignal || signal;
+          result = await aiRunTool(root, norm.name, norm.input ?? {}, send, allowWrites, latestUserText, toolSignal);
         } catch (error) {
           result = `That tool failed: ${String(error?.message || error)}`;
         }
@@ -291,7 +292,7 @@ async function aiRunTextToolFallbackLoop({ sdkModel, root, system, initialMessag
       send({ type: "tool_start", id: callId, name: norm.name, input: norm.input });
       const result = blockedMsg
         ? blockedMsg
-        : await aiRunTool(root, norm.name, norm.input ?? {}, send, allowWrites, latestUserText);
+        : await aiRunTool(root, norm.name, norm.input ?? {}, send, allowWrites, latestUserText, signal);
       if (!blockedMsg) tracker.record(norm.name, norm.input, result);
       send({ type: "tool_end", id: callId, name: norm.name, result });
       resultBlocks.push(`<tool_result name="${norm.name}">\n${result}\n</tool_result>`);
@@ -308,7 +309,7 @@ async function aiRunUnifiedTurn({ provider, model, key, root, system, systemWith
   const latestUserText = aiGetLatestUserText(messages);
   const tracker = aiCreateDoomLoopTracker();
   const maxSteps = effort === "thinking" ? AI_MAX_TOOL_ROUNDS : 16;
-  const sdkTools = aiBuildSdkToolSet({ root, allowWrites, send, latestUserText, tracker });
+  const sdkTools = aiBuildSdkToolSet({ root, allowWrites, send, latestUserText, tracker, signal });
 
   try {
     const res = await aiStreamOnceSdk({

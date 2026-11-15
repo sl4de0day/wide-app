@@ -540,7 +540,7 @@ export function subscribeFsChanges(): () => void {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       void useWorkspace.getState().refresh();
-      void import("./editor").then((m) => m.useEditor.getState().checkDiskChanges());
+      void useEditor.getState().checkDiskChanges();
     }, 200);
   });
 

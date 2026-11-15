@@ -89,11 +89,16 @@ function collectFiles(dir, out) {
 }
 
 const snapshots = new Map();
+const MAX_SNAPSHOTS = 500;
 
 function snapshotFor(file) {
   const version = versions.get(file) ?? 0;
   const cached = snapshots.get(file);
-  if (cached && cached.version === version) return cached.snapshot;
+  if (cached && cached.version === version) {
+    snapshots.delete(file);
+    snapshots.set(file, cached);
+    return cached.snapshot;
+  }
 
   const edited = overlay.get(file);
   let snapshot;
@@ -107,6 +112,11 @@ function snapshotFor(file) {
       return undefined;
     }
   }
+  if (!snapshots.has(file) && snapshots.size >= MAX_SNAPSHOTS) {
+    const oldest = snapshots.keys().next().value;
+    if (oldest !== undefined) snapshots.delete(oldest);
+  }
+  snapshots.delete(file);
   snapshots.set(file, { version, snapshot });
   return snapshot;
 }
@@ -189,7 +199,8 @@ const OPS = {
   close(filePath) {
     const file = norm(filePath);
     overlay.delete(file);
-    bumpVersion(file);
+    snapshots.delete(file);
+    versions.delete(file);
     return { ok: true };
   },
 

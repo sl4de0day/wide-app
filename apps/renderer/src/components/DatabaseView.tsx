@@ -328,6 +328,8 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
   const setQueryText = useDatabase((s) => s.setQueryText);
   const runQuery = useDatabase((s) => s.runQuery);
   const dismissDangerousPrompt = useDatabase((s) => s.dismissDangerousPrompt);
+  const loadHistory = useDatabase((s) => s.loadHistory);
+  const clearHistory = useDatabase((s) => s.clearHistory);
   const loadSavedQueries = useDatabase((s) => s.loadSavedQueries);
   const saveCurrentQuery = useDatabase((s) => s.saveCurrentQuery);
 
@@ -339,6 +341,10 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
   useEffect(() => {
     void loadSavedQueries();
   }, [root, loadSavedQueries]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   const handleFormat = () => {
     try {
@@ -565,9 +571,21 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
           <div className="flex w-64 shrink-0 flex-col border-l border-line bg-surface text-[11px]">
             <div className="flex items-center justify-between border-b border-line px-3 py-2 font-semibold text-ink-2">
               <span>{showSidebar === "history" ? t("Query History") : t("Saved Queries")}</span>
-              <button type="button" onClick={() => setShowSidebar(null)} className="text-ink-3 hover:text-ink">
-                <X className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {showSidebar === "history" && history.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void clearHistory()}
+                    title={t("Clear History")}
+                    className="rounded border border-line bg-raised px-1.5 py-0.5 text-[10px] font-normal text-ink-3 hover:text-red-400"
+                  >
+                    {t("Clear")}
+                  </button>
+                )}
+                <button type="button" onClick={() => setShowSidebar(null)} className="text-ink-3 hover:text-ink">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
               {showSidebar === "history"
@@ -580,7 +598,7 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
                     >
                       <div className="line-clamp-2 font-mono text-[10px] text-ink">{item.sql}</div>
                       <div className="mt-1 flex justify-between text-[9px] text-ink-3">
-                        <span>{item.rowCount} rows</span>
+                        <span className={item.error ? "text-red-400" : ""}>{item.error ? t("Error") : `${item.rowCount} rows`}</span>
                         <span>{item.durationMs}ms</span>
                       </div>
                     </button>
@@ -957,6 +975,37 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
   );
 }
 
+function sanitizeMermaidIdent(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9_]/g, "_");
+  return cleaned || "entity";
+}
+
+export function buildMermaidErDiagram(schema: DbSchemaSnapshot): string {
+  const lines: string[] = ["erDiagram"];
+  for (const fk of schema.foreignKeys) {
+    lines.push(
+      `  ${sanitizeMermaidIdent(fk.fromTable)} }o--|| ${sanitizeMermaidIdent(fk.toTable)} : "${fk.fromColumn} -> ${fk.toColumn}"`
+    );
+  }
+  const fkColsByTable = new Map<string, Set<string>>();
+  for (const fk of schema.foreignKeys) {
+    if (!fkColsByTable.has(fk.fromTable)) fkColsByTable.set(fk.fromTable, new Set());
+    fkColsByTable.get(fk.fromTable)!.add(fk.fromColumn);
+  }
+  for (const tbl of schema.tables) {
+    const tName = sanitizeMermaidIdent(tbl.name);
+    lines.push(`  ${tName} {`);
+    for (const col of tbl.columns) {
+      const colType = (col.dataType || "TEXT").replace(/[^a-zA-Z0-9_]/g, "_");
+      const colName = sanitizeMermaidIdent(col.name);
+      const flags = [col.primaryKey ? "PK" : "", fkColsByTable.get(tbl.name)?.has(col.name) ? "FK" : ""].filter(Boolean).join(",");
+      lines.push(`    ${colType} ${colName}${flags ? ` ${flags}` : ""}`);
+    }
+    lines.push("  }");
+  }
+  return lines.join("\n");
+}
+
 function SchemaDiagramSubView({ activeConn, schema }: { activeConn?: DbConnectionSummary; schema?: DbSchemaSnapshot }) {
   const t = useT();
   const openTableGrid = useDatabase((s) => s.openTableGrid);
@@ -1008,20 +1057,40 @@ function SchemaDiagramSubView({ activeConn, schema }: { activeConn?: DbConnectio
     useEditor.getState().openAiChat(sid, `DB Schema: ${activeConn.name}`);
   };
 
+  const handleCopyMermaid = async () => {
+    const text = buildMermaidErDiagram(schema);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(t("Copied Mermaid ERD diagram."));
+    } catch {
+      toast.error(t("Could not copy Mermaid diagram."));
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-b border-line bg-surface px-3 py-1.5 text-[11px]">
         <span className="text-ink-2">
           {schema.tables.length} {t("Tables")} · {schema.foreignKeys.length} {t("Foreign Keys")} ({t("drag cards to arrange")})
         </span>
-        <button
-          type="button"
-          onClick={() => void handleSendAllDdlToAi()}
-          className="flex items-center gap-1 rounded border border-accent/40 bg-accent/15 px-2.5 py-1 text-accent hover:bg-accent/25"
-        >
-          <Sparkles className="h-3 w-3" />
-          <span>{t("Analyze Schema with AI")}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleCopyMermaid()}
+            className="flex items-center gap-1 rounded border border-line bg-raised px-2.5 py-1 text-ink-2 hover:text-ink"
+          >
+            <Copy className="h-3 w-3" />
+            <span>{t("Copy Mermaid")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSendAllDdlToAi()}
+            className="flex items-center gap-1 rounded border border-accent/40 bg-accent/15 px-2.5 py-1 text-accent hover:bg-accent/25"
+          >
+            <Sparkles className="h-3 w-3" />
+            <span>{t("Analyze Schema with AI")}</span>
+          </button>
+        </div>
       </div>
 
       <div className="relative flex-1 overflow-auto bg-canvas">

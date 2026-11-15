@@ -1,6 +1,6 @@
 {
   "name": "wide-app",
-  "version": "0.4141126",
+  "version": "0.5151126",
   "description": "Autonomous AI workspace and mission control for the Wide ecosystem",
   "private": true,
   "workspaces": [
@@ -28,6 +28,9 @@
     "test": "npm run test:unit && npm run test:smoke",
     "test:unit": "npm --prefix apps/renderer run test",
     "test:smoke": "node sidecar/smoke-backend.cjs",
+    "test:host-win": "powershell -ExecutionPolicy Bypass -File scripts/test-host-win.ps1",
+    "sync:ide": "node scripts/sync-shared.cjs --from current --apply",
+    "sync:check": "node scripts/sync-shared.cjs --from current --check",
     "start": "node scripts/start.cjs",
     "start:linux": "electron scripts/host-linux.cjs",
     "dev:linux": "electron scripts/host-linux.cjs --dev",

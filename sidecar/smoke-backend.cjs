@@ -4,11 +4,24 @@ const cp = require('node:child_process');
 const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 
+const fsRoot = require('node:fs');
 const os = require('node:os');
+const smokeOwnedConfigDir = !process.env.XDG_CONFIG_HOME;
 const testConfigDir = process.env.XDG_CONFIG_HOME || path.join(os.tmpdir(), `wide-smoke-${process.pid}`);
+fsRoot.mkdirSync(testConfigDir, { recursive: true });
+if (smokeOwnedConfigDir) {
+  process.on('exit', () => {
+    try { fsRoot.rmSync(testConfigDir, { recursive: true, force: true }); } catch {}
+  });
+}
 const child = cp.spawn(process.execPath, [path.join(__dirname, 'sidecar.cjs')], {
   stdio: ['pipe', 'pipe', 'inherit'],
-  env: { ...process.env, XDG_CONFIG_HOME: testConfigDir },
+  env: {
+    ...process.env,
+    XDG_CONFIG_HOME: testConfigDir,
+    APPDATA: testConfigDir,
+    LOCALAPPDATA: testConfigDir,
+  },
 });
 let buf = '';
 const replies = new Map();
@@ -86,6 +99,8 @@ const GONE = [
   failed += await checkCustomRules();
   failed += await checkAgentEmojiGuardrail();
   failed += await checkDatabaseLifecycle();
+  failed += await checkAiBrowserFeatures();
+  failed += await checkRegressions();
   failed += checkNativeColours();
 
   console.log(failed === 0 ? '\nAll backend checks passed.' : `\n${failed} check(s) failed.`);
@@ -182,6 +197,45 @@ async function checkSecurityScanControls() {
   await invoke('security:baseline', [dir, 'clear']);
   const cleared = await invoke('security:scanProject', [dir]);
   report((cleared.result?.findings ?? []).length > 0, 'clearing the baseline brings them back');
+
+  const secSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '65-secscan.js'), 'utf8');
+  const vm = require('node:vm');
+  const supStart = secSrc.indexOf('function secRuleSuppressed');
+  const supEnd = secSrc.indexOf('const SEC_HIGH_ENTROPY');
+  const supCtx = vm.createContext({});
+  vm.runInContext(secSrc.slice(supStart, supEnd), supCtx);
+  const stickyRule = { notMatch: /foo/g, notMatchUnless: null };
+  const s1 = supCtx.secRuleSuppressed(stickyRule, 'foo');
+  const s2 = supCtx.secRuleSuppressed(stickyRule, 'foo');
+  report(s1 === true && s2 === true, 'secRuleSuppressed resets sticky global lastIndex across calls');
+
+  const isoA = pathSync.join(osSync.tmpdir(), `wide-osv-iso-a-${process.pid}`);
+  const isoB = pathSync.join(osSync.tmpdir(), `wide-osv-iso-b-${process.pid}`);
+  fsSync.mkdirSync(pathSync.join(isoA, '.wide'), { recursive: true });
+  fsSync.mkdirSync(isoB, { recursive: true });
+  const isoPkg = JSON.stringify({ name: 'iso-test', dependencies: { 'demo-isolated-pkg': '1.0.0' } }, null, 2);
+  fsSync.writeFileSync(pathSync.join(isoA, 'package.json'), isoPkg, 'utf8');
+  fsSync.writeFileSync(pathSync.join(isoB, 'package.json'), isoPkg, 'utf8');
+  fsSync.writeFileSync(
+    pathSync.join(isoA, '.wide', 'osv.json'),
+    JSON.stringify({
+      npm: [{ name: 'demo-isolated-pkg', lt: '2.0.0', id: 'CVE-9999-ISOLATION', cwe: 'CWE-1395', sev: 'high', note: 'isolated project advisory' }],
+    }),
+    'utf8'
+  );
+  const [scanA, scanB] = await Promise.all([
+    invoke('security:scanProject', [isoA]),
+    invoke('security:scanProject', [isoB]),
+  ]);
+  const [rescanA, rescanB] = await Promise.all([
+    invoke('security:rescanFile', [isoA, pathSync.join(isoA, 'package.json'), isoPkg]),
+    invoke('security:rescanFile', [isoB, pathSync.join(isoB, 'package.json'), isoPkg]),
+  ]);
+  const hitA = [...(scanA.result?.findings || []), ...(rescanA.result?.findings || [])].some((f) => f.ruleId === 'vuln-dep-cve-9999-isolation');
+  const hitB = [...(scanB.result?.findings || []), ...(rescanB.result?.findings || [])].some((f) => f.ruleId === 'vuln-dep-cve-9999-isolation');
+  report(hitA && !hitB, 'concurrent secScanFile and scanProject isolate project OSV snapshots per workspace');
+  try { fsSync.rmSync(isoA, { recursive: true, force: true }); } catch {}
+  try { fsSync.rmSync(isoB, { recursive: true, force: true }); } catch {}
 
   try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
   return failed;
@@ -700,6 +754,33 @@ async function checkDatabaseLifecycle() {
     const selRes = (await invoke('db:query', [id, 'SELECT id, email FROM users'])).result;
     report(selRes?.ok === true && selRes.result?.rowCount === 1, 'db:query executes SELECT cleanly');
 
+    const histList = (await invoke('db:listHistory', [id])).result;
+    report(
+      histList?.ok === true &&
+        Array.isArray(histList.history) &&
+        histList.history.length >= 2 &&
+        typeof histList.history[0].durationMs === 'number' &&
+        histList.history.some((h) => h.sql.includes('SELECT id, email FROM users')),
+      'db:listHistory persists recent queries with durationMs and rowCount',
+    );
+
+    const csvExport = (await invoke('db:export', [id, { format: 'csv', table: 'users' }])).result;
+    const sqlExport = (await invoke('db:export', [id, { format: 'sql', table: 'users' }])).result;
+    report(
+      csvExport?.ok === true &&
+        String(csvExport.content || '').includes('a@b.test') &&
+        sqlExport?.ok === true &&
+        String(sqlExport.content || '').includes('INSERT INTO'),
+      'db:export outputs CSV and SQL INSERT statements',
+    );
+
+    const histClear = (await invoke('db:clearHistory', [id])).result;
+    const histAfterClear = (await invoke('db:listHistory', [id])).result;
+    report(
+      histClear?.ok === true && histAfterClear?.ok === true && histAfterClear.history.length === 0,
+      'db:clearHistory removes persisted query history for connection',
+    );
+
     const expRes = (await invoke('db:query', [id, 'SELECT * FROM users', { explain: true }])).result;
     report(expRes?.ok === true && expRes.result?.isExplain === true, 'db:query EXPLAIN returns query plan');
 
@@ -727,6 +808,59 @@ async function checkDatabaseLifecycle() {
     report(roQueryBlocked?.ok === false && roQueryBlocked?.readOnlyBlocked === true, 'readOnly connection blocks write SQL');
     const roDiffBlocked = (await invoke('db:applyChanges', [id, [{ kind: 'delete', table: 'users', key: { id: 1 } }]])).result;
     report(roDiffBlocked?.ok === false && roDiffBlocked?.readOnlyBlocked === true, 'readOnly connection blocks db:applyChanges');
+
+    const sqSaved = (await invoke('db:saveQuery', [dir, 'smoke-q', 'SELECT 1;'])).result;
+    const sqList = (await invoke('db:listSavedQueries', [dir])).result;
+    report(
+      sqSaved?.ok === true &&
+        sqList?.ok === true &&
+        Array.isArray(sqList.queries) &&
+        sqList.queries.some((q) => q.name === 'smoke-q' && q.sql === 'SELECT 1;'),
+      'db:saveQuery and db:listSavedQueries obey isInside(full, root) argument order',
+    );
+
+    const cancelReply = await invoke('db:cancel', ['nonexistent-query-id']);
+    report(!cancelReply.error && cancelReply.result?.ok === false, 'db:cancel is registered and handles missing queries cleanly');
+
+    const findVaultFile = (rootDir) => {
+      if (!fsSync.existsSync(rootDir)) return null;
+      const stack = [rootDir];
+      while (stack.length) {
+        const cur = stack.pop();
+        for (const ent of fsSync.readdirSync(cur, { withFileTypes: true })) {
+          const full = pathSync.join(cur, ent.name);
+          if (ent.isDirectory()) stack.push(full);
+          else if (ent.isFile() && ent.name === 'database-vault.bin') return full;
+        }
+      }
+      return null;
+    };
+    const vaultPath = findVaultFile(testConfigDir);
+    if (vaultPath) {
+      const validVaultBuf = fsSync.readFileSync(vaultPath);
+      fsSync.writeFileSync(vaultPath, Buffer.from('x'), 'binary');
+      const saveOnCorrupt = (await invoke('db:save', [{
+        name: 'corrupt-guard',
+        engine: 'sqlite',
+        filePath: dbFile,
+        password: 'pw',
+      }])).result;
+      const listOnCorrupt = (await invoke('db:list', [])).result;
+      const corruptBackups = fsSync.readdirSync(pathSync.dirname(vaultPath)).filter((n) => n.startsWith('database-vault.bin.corrupt-'));
+      report(
+        saveOnCorrupt?.ok === false &&
+          listOnCorrupt?.ok === true &&
+          Boolean(listOnCorrupt?.vaultError) &&
+          corruptBackups.length > 0,
+        'corrupt database vault blocks overwrite, preserves backup, and surfaces vaultError on db:list',
+      );
+      fsSync.writeFileSync(vaultPath, validVaultBuf);
+      for (const b of corruptBackups) {
+        try { fsSync.unlinkSync(pathSync.join(pathSync.dirname(vaultPath), b)); } catch {}
+      }
+    } else {
+      report(false, 'database-vault.bin was written inside testConfigDir');
+    }
 
     await invoke('db:delete', [id]);
   }
@@ -787,5 +921,151 @@ async function checkAgentEmojiGuardrail() {
   const outText = collected.filter((c) => c.type === 'text').map((c) => c.text).join('');
   const outThink = collected.filter((c) => c.type === 'thinking').map((c) => c.text).join('');
   report(outText === 'Hello      OK' && outThink === 'plan ', 'streaming emoji sanitizer strips split surrogates, keycaps, variation icons, and ZWJ clusters');
+  return failed;
+}
+
+async function checkAiBrowserFeatures() {
+  const vm = require('node:vm');
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const browserSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '44-ai-1-browser.js'), 'utf8');
+  const endSlice = browserSrc.indexOf('function aiBrowserBroadcast');
+  const ctx = vm.createContext({ Buffer, URL, Map, Set, Date, Math, Number, String, Array, Object, process });
+  vm.runInContext(browserSrc.slice(0, endSlice), ctx);
+
+  report(
+    ctx.aiBrowserStripEmojis('\uD83D\uDE80 Wide \u2B50 Dashboard \uD83D\uDC68\u200D\uD83D\uDCBB') === 'Wide Dashboard',
+    'aiBrowserStripEmojis removes emojis and collapses whitespace in browser titles',
+  );
+  const clamped = ctx.aiBrowserClampHighlight({ x: -20, y: 780, width: 200, height: 100 }, 'Submit \uD83D\uDE80', 'click');
+  report(
+    Boolean(clamped && clamped.x === 0 && clamped.y === 780 && clamped.width === 200 && clamped.height === 20 && clamped.target === 'Submit'),
+    'aiBrowserClampHighlight clamps bounding boxes inside 1280x800 viewport and sanitizes target',
+  );
+  const redactedHeaders = ctx.aiBrowserRedactHarHeaders({
+    Authorization: 'Bearer secret123',
+    Cookie: 'sid=abc',
+    'Content-Type': 'application/json',
+  });
+  const authHdr = redactedHeaders.find((h) => h.name === 'Authorization');
+  const ctHdr = redactedHeaders.find((h) => h.name === 'Content-Type');
+  report(
+    Boolean(authHdr?.value === '[REDACTED]' && ctHdr?.value === 'application/json'),
+    'aiBrowserRedactHarHeaders masks secret auth/cookie headers',
+  );
+  const harUnit = ctx.aiBrowserBuildHarLog();
+  report(
+    harUnit?.log?.version === '1.2' && Array.isArray(harUnit.log.pages) && Array.isArray(harUnit.log.entries),
+    'aiBrowserBuildHarLog outputs valid HAR 1.2 structure',
+  );
+
+  const stBefore = (await invoke('ai:browserStatus', [])).result;
+  report(stBefore?.ok === true && stBefore?.session?.stealth === false, 'ai:browserStatus reports initial stealth=false');
+
+  const togOn = (await invoke('ai:browserNav', [{ action: 'toggle_stealth' }])).result;
+  report(togOn?.ok === true && togOn?.session?.stealth === true, 'ai:browserNav toggle_stealth enables stealth mode');
+
+  const harIpc = (await invoke('ai:browserNav', [{ action: 'export_har' }])).result;
+  report(harIpc?.ok === true && harIpc?.har?.log?.version === '1.2', 'ai:browserNav export_har returns HAR 1.2 log');
+
+  await invoke('ai:browserNav', [{ action: 'toggle_stealth' }]);
+  return failed;
+}
+
+async function checkRegressions() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  const osSync = require('node:os');
+  const vm = require('node:vm');
+  const { Worker } = require('node:worker_threads');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const dupDir = pathSync.join(osSync.tmpdir(), `wide-build-dup-${process.pid}`);
+  try {
+    fsSync.mkdirSync(pathSync.join(dupDir, 'apps', 'backend', 'src'), { recursive: true });
+    fsSync.mkdirSync(pathSync.join(dupDir, 'apps', 'backend', 'runtime'), { recursive: true });
+    fsSync.copyFileSync(pathSync.join(ROOT, 'apps', 'backend', 'build.cjs'), pathSync.join(dupDir, 'apps', 'backend', 'build.cjs'));
+    fsSync.writeFileSync(pathSync.join(dupDir, 'apps', 'backend', 'src', '00-a.js'), 'function wideDupSym() { return 1; }\n', 'utf8');
+    fsSync.writeFileSync(pathSync.join(dupDir, 'apps', 'backend', 'src', '01-b.js'), 'function wideDupSym() { return 2; }\n', 'utf8');
+    const buildRun = cp.spawnSync(process.execPath, [pathSync.join(dupDir, 'apps', 'backend', 'build.cjs')], {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_PATH: pathSync.join(ROOT, 'node_modules') },
+    });
+    report(
+      buildRun.status !== 0 && /Duplicate top-level backend symbol "wideDupSym"/.test(String(buildRun.stderr || '')),
+      'build.cjs rejects duplicate top-level symbols across backend segments',
+    );
+  } finally {
+    try { fsSync.rmSync(dupDir, { recursive: true, force: true }); } catch {}
+  }
+
+  const shimSrc = fsSync.readFileSync(pathSync.join(ROOT, 'native-host', 'assets', 'preload-shim.js'), 'utf8');
+  let onMsg = null;
+  const fakeWin = {
+    chrome: {
+      webview: {
+        addEventListener: (_type, fn) => { onMsg = fn; },
+        postMessage: () => {},
+      },
+    },
+    addEventListener: () => {},
+  };
+  fakeWin.window = fakeWin;
+  const vmCtx = vm.createContext({ ...fakeWin, console, Map, Set, Array, Error, Promise });
+  vm.runInContext(shimSrc, vmCtx);
+  const apiObj = fakeWin.api || vmCtx.api;
+  const p1 = apiObj.readDir('a');
+  const p2 = apiObj.readDir('b');
+  if (onMsg) onMsg({ data: { type: 'event', channel: 'host:backend', payload: 'stopped' } });
+  const settled = await Promise.allSettled([p1, p2]);
+  report(
+    settled.length === 2 && settled.every((r) => r.status === 'rejected' && /stopped/i.test(String(r.reason?.message || ''))),
+    'preload-shim failPending rejects all Map values via Array.from instead of hanging',
+  );
+
+  const workerPath = pathSync.join(ROOT, 'sidecar', 'workers', 'ts-worker.cjs');
+  const worker = new Worker(workerPath);
+  const workerCall = (op, args) =>
+    new Promise((resolve, reject) => {
+      const id = `${Date.now()}_${Math.random()}`;
+      const timer = setTimeout(() => {
+        worker.off('message', onMessage);
+        reject(new Error(`ts-worker timeout on ${op}`));
+      }, 10000);
+      const onMessage = (msg) => {
+        if (!msg || msg.id !== id) return;
+        clearTimeout(timer);
+        worker.off('message', onMessage);
+        if (msg.error) reject(new Error(msg.error));
+        else resolve(msg.result);
+      };
+      worker.on('message', onMessage);
+      worker.postMessage({ id, op, args });
+    });
+  try {
+    const targetTs = pathSync.join(ROOT, 'apps', 'renderer', 'src', 'lib', 'utils.ts');
+    const r1 = await workerCall('diagnostics', [ROOT, targetTs]);
+    const c1 = await workerCall('close', [ROOT]);
+    const r2 = await workerCall('diagnostics', [ROOT, targetTs]);
+    report(
+      Array.isArray(r1?.diagnostics) && c1?.ok === true && Array.isArray(r2?.diagnostics),
+      'ts-worker recovers cleanly across close and subsequent diagnostics calls',
+    );
+  } catch {
+    report(false, 'ts-worker recovers cleanly across close and subsequent diagnostics calls');
+  } finally {
+    await worker.terminate();
+  }
+
   return failed;
 }

@@ -23,4 +23,5 @@ function collectFiles(dir2, out) {
     }
   }
 }
-const displayPartsToString = (parts) => ts.displayPartsToString(parts ?? []);
+const displayPartsToString = (parts) =>
+  Array.isArray(parts) ? parts.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("") : "";

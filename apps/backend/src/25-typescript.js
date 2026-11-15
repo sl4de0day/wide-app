@@ -1,41 +1,63 @@
 
 
 let tsWorker = null;
-let tsWorkerFailed = false;
+let tsWorkerRetryAfter = 0;
+let tsWorkerFailures = 0;
+let tsWorkerStartedAt = 0;
 let tsSeq = 0;
 const tsPending =  new Map();
+const TS_CALL_TIMEOUT_MS = 15000;
 
 function tsWorkerPath() {
 
   return node_path.resolve(__dirname, "..", "..", "sidecar", "workers", "ts-worker.cjs");
 }
 
+function rejectAllTsPending(error) {
+  for (const pending of tsPending.values()) {
+    clearTimeout(pending.timer);
+    pending.reject(error);
+  }
+  tsPending.clear();
+}
+
 function ensureTsWorker() {
-  if (tsWorker || tsWorkerFailed) return tsWorker;
+  if (tsWorker) return tsWorker;
+  if (Date.now() < tsWorkerRetryAfter) return null;
   try {
     const { Worker } = require("node:worker_threads");
+    tsWorkerStartedAt = Date.now();
     tsWorker = new Worker(tsWorkerPath());
     tsWorker.on("message", (msg) => {
       const pending = tsPending.get(msg.id);
       if (!pending) return;
       tsPending.delete(msg.id);
+      clearTimeout(pending.timer);
+      tsWorkerFailures = 0;
+      tsWorkerRetryAfter = 0;
       if (msg.error) pending.reject(new Error(msg.error));
       else pending.resolve(msg.result);
     });
     tsWorker.on("error", (error) => {
       console.error("[ts] The language-service worker failed:", error.message);
-      for (const pending of tsPending.values()) pending.reject(error);
-      tsPending.clear();
+      rejectAllTsPending(error);
       tsWorker = null;
+      tsWorkerFailures += 1;
+      tsWorkerRetryAfter = Date.now() + Math.min(tsWorkerFailures * 2000, 30000);
     });
     tsWorker.on("exit", () => {
-      for (const pending of tsPending.values()) pending.reject(new Error("ts worker exited"));
-      tsPending.clear();
+      rejectAllTsPending(new Error("ts worker exited"));
       tsWorker = null;
+      if (Date.now() - tsWorkerStartedAt < 2000) {
+        tsWorkerFailures += 1;
+        tsWorkerRetryAfter = Date.now() + Math.min(tsWorkerFailures * 2000, 30000);
+      }
     });
     tsWorker.unref();
   } catch (error) {
-    tsWorkerFailed = true;
+    tsWorker = null;
+    tsWorkerFailures += 1;
+    tsWorkerRetryAfter = Date.now() + Math.min(tsWorkerFailures * 5000, 60000);
     console.error("[ts] Could not start the language-service worker:", error.message);
   }
   return tsWorker;
@@ -46,8 +68,18 @@ function tsCall(op, args, fallback) {
   if (!worker) return Promise.resolve(fallback);
   const id = ++tsSeq;
   return new Promise((resolve, reject) => {
-    tsPending.set(id, { resolve, reject });
-    worker.postMessage({ id, op, args });
+    const timer = setTimeout(() => {
+      if (tsPending.delete(id)) reject(new Error(`ts ${op} timed out`));
+    }, TS_CALL_TIMEOUT_MS);
+    timer.unref?.();
+    tsPending.set(id, { resolve, reject, timer });
+    try {
+      worker.postMessage({ id, op, args });
+    } catch (error) {
+      tsPending.delete(id);
+      clearTimeout(timer);
+      reject(error);
+    }
   }).catch((error) => {
     console.warn(`[ts] ${op} failed:`, error.message);
     return fallback;
