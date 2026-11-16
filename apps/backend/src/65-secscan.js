@@ -3562,15 +3562,36 @@ function registerSecScanHandlers() {
     if (maj === 13 || maj === 14) return true;
     return false;
   }
-  const SEC_MANIFESTS = new Set(["requirements.txt", "pom.xml", "package-lock.json", "go.mod"]);
+  const SEC_MANIFESTS = new Set([
+    "requirements.txt", "pom.xml", "package-lock.json", "go.mod",
+    "yarn.lock", "pnpm-lock.yaml", "cargo.toml", "cargo.lock",
+    "composer.lock", "gemfile.lock", "poetry.lock", "pipfile.lock"
+  ]);
 
   const SEC_OSV_CACHE = new Map();
-  const OSV_ECOSYSTEM = { npm: "npm", pypi: "pip", pip: "pip", maven: "maven", go: "go" };
+  const SEC_OSV_ECOSYSTEMS = ["npm", "pip", "maven", "go", "cargo", "nuget", "composer", "rubygems"];
+  const OSV_ECOSYSTEM = {
+    npm: "npm",
+    pypi: "pip",
+    pip: "pip",
+    maven: "maven",
+    go: "go",
+    golang: "go",
+    cargo: "cargo",
+    crates: "cargo",
+    "crates.io": "cargo",
+    rust: "cargo",
+    nuget: "nuget",
+    composer: "composer",
+    packagist: "composer",
+    rubygems: "rubygems"
+  };
 
   function buildOsvEcoIndex(db) {
-    const byEco = { npm: new Map(), pip: new Map(), maven: new Map(), go: new Map() };
+    const byEco = {};
+    for (const eco of SEC_OSV_ECOSYSTEMS) byEco[eco] = new Map();
     if (!db || typeof db !== "object") return byEco;
-    for (const eco of ["npm", "pip", "maven", "go"]) {
+    for (const eco of SEC_OSV_ECOSYSTEMS) {
       const arr = db[eco];
       if (!Array.isArray(arr)) continue;
       const map = byEco[eco];
@@ -3589,17 +3610,30 @@ function registerSecScanHandlers() {
   }
 
   function parseOsvDoc(parsed) {
-    const db = { npm: [], pip: [], maven: [], go: [], byEco: null };
+    const db = { byEco: null };
+    for (const eco of SEC_OSV_ECOSYSTEMS) db[eco] = [];
     if (!parsed || typeof parsed !== "object") {
       db.byEco = buildOsvEcoIndex(db);
       return db;
     }
-    if (!Array.isArray(parsed) && (parsed.npm || parsed.pip || parsed.maven || parsed.go)) {
-      for (const eco of ["npm", "pip", "maven", "go"]) {
+    const hasEcoKeys = !Array.isArray(parsed) && SEC_OSV_ECOSYSTEMS.some((eco) => Array.isArray(parsed[eco]));
+    if (hasEcoKeys) {
+      for (const eco of SEC_OSV_ECOSYSTEMS) {
         if (!Array.isArray(parsed[eco])) continue;
         for (const v of parsed[eco]) {
-          if (v && typeof v === "object" && v.name && v.lt) {
-            db[eco].push({ name: String(v.name), ge: v.ge ? String(v.ge) : undefined, lt: String(v.lt), id: String(v.id || "advisory"), cwe: v.cwe || "CWE-1395", sev: v.sev || "medium", note: String(v.note || "listed in the project advisory snapshot") });
+          if (v && typeof v === "object" && v.name && (v.lt || v.le)) {
+            db[eco].push({
+              name: String(v.name),
+              ge: v.ge ? String(v.ge) : undefined,
+              lt: v.lt ? String(v.lt) : undefined,
+              le: v.le ? String(v.le) : undefined,
+              id: String(v.id || "advisory"),
+              cwe: v.cwe || "CWE-1395",
+              sev: v.sev || "medium",
+              note: String(v.note || "listed in the project advisory snapshot"),
+              kev: Boolean(v.kev),
+              epss: typeof v.epss === "number" ? v.epss : undefined
+            });
           }
         }
       }
@@ -3623,14 +3657,25 @@ function registerSecScanHandlers() {
         if (!eco) continue;
         let introduced;
         let fixed;
+        let lastAffected;
         for (const range of Array.isArray(aff.ranges) ? aff.ranges : []) {
           for (const ev of Array.isArray(range.events) ? range.events : []) {
             if (ev.introduced && ev.introduced !== "0") introduced = ev.introduced;
             if (ev.fixed) fixed = ev.fixed;
+            if (ev.last_affected) lastAffected = ev.last_affected;
           }
         }
-        if (!fixed) continue;
-        db[eco].push({ name: String(pkg.name), ge: introduced, lt: String(fixed), id, cwe, sev, note });
+        if (!fixed && !lastAffected) continue;
+        db[eco].push({
+          name: String(pkg.name),
+          ge: introduced,
+          lt: fixed ? String(fixed) : undefined,
+          le: !fixed && lastAffected ? String(lastAffected) : undefined,
+          id,
+          cwe,
+          sev,
+          note
+        });
       }
     }
     db.byEco = buildOsvEcoIndex(db);
@@ -3686,8 +3731,9 @@ function registerSecScanHandlers() {
   };
 
   const SEC_STATIC_OSV_INDEX = (() => {
-    const merged = { npm: [], pip: [], maven: [], go: [] };
-    for (const eco of ["npm", "pip", "maven", "go"]) {
+    const merged = {};
+    for (const eco of SEC_OSV_ECOSYSTEMS) merged[eco] = [];
+    for (const eco of SEC_OSV_ECOSYSTEMS) {
       if (SEC_VULN_DB[eco]) merged[eco].push(...SEC_VULN_DB[eco]);
       if (typeof OSV_SNAPSHOT === "object" && OSV_SNAPSHOT && Array.isArray(OSV_SNAPSHOT[eco])) {
         merged[eco].push(...OSV_SNAPSHOT[eco]);
@@ -3714,7 +3760,9 @@ function registerSecScanHandlers() {
       if (!list) continue;
       for (const v of list) {
         if (v.ge && verCmp(clean, cleanVer(v.ge)) < 0) continue;
-        if (verCmp(clean, cleanVer(v.lt)) < 0) return v;
+        if (v.lt && verCmp(clean, cleanVer(v.lt)) >= 0) continue;
+        if (v.le && verCmp(clean, cleanVer(v.le)) > 0) continue;
+        if (v.lt || v.le || v.ge) return v;
       }
     }
     return null;
@@ -3724,9 +3772,9 @@ function registerSecScanHandlers() {
     const clean = cleanVer(version);
     if (!clean) return null;
     const buckets = [
-      SEC_STATIC_OSV_INDEX[eco] ? SEC_STATIC_OSV_INDEX[eco].get(lname) : null,
-      secRemoteOsv && secRemoteOsv.byEco && secRemoteOsv.byEco[eco] ? secRemoteOsv.byEco[eco].get(lname) : null,
       projectOsv && projectOsv.byEco && projectOsv.byEco[eco] ? projectOsv.byEco[eco].get(lname) : null,
+      secRemoteOsv && secRemoteOsv.byEco && secRemoteOsv.byEco[eco] ? secRemoteOsv.byEco[eco].get(lname) : null,
+      SEC_STATIC_OSV_INDEX[eco] ? SEC_STATIC_OSV_INDEX[eco].get(lname) : null,
     ];
     return matchVulnFromBuckets(clean, buckets);
   }
@@ -3736,12 +3784,21 @@ function registerSecScanHandlers() {
     return line;
   }
   function vulnFinding(file, name, version, hit, line) {
+    const tags = [];
+    if (hit.kev) tags.push("CISA KEV");
+    if (typeof hit.epss === "number" && hit.epss > 0) tags.push(`EPSS ${(hit.epss * 100).toFixed(1)}%`);
+    const tagStr = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
+    const fixNote = hit.lt
+      ? `Upgrade to ${hit.lt} or later.`
+      : hit.le
+        ? `Upgrade to a version newer than ${hit.le}.`
+        : "Upgrade to a patched release.";
     return {
       ruleId: `vuln-dep-${hit.id.toLowerCase()}`,
       cwe: hit.cwe,
       severity: hit.sev,
       confidence: "high",
-      message: `${name} ${version} — ${hit.id} (${hit.note}). Upgrade to ${hit.lt} or later.`,
+      message: `${name} ${version} — ${hit.id}${tagStr} (${hit.note}). ${fixNote}`,
       file: node_path.normalize(file),
       line: line || 1,
       col: 1,
@@ -3821,13 +3878,189 @@ function registerSecScanHandlers() {
     return out;
   }
 
+  function auditYarnLock(file, content, projectOsv) {
+    const out = [];
+    const lines = content.split("\n");
+    const seen = new Set();
+    let currentPkgs = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^[^\s#"][^:\n]*:$/.test(line.trim()) || /^"[^"]+.*":$/.test(line.trim())) {
+        currentPkgs = line
+          .trim()
+          .replace(/:$/, "")
+          .split(",")
+          .map((spec) => {
+            const cleaned = spec.trim().replace(/^["']|["']$/g, "");
+            const atIdx = cleaned.lastIndexOf("@");
+            return atIdx > 0 ? cleaned.slice(0, atIdx) : "";
+          })
+          .filter(Boolean);
+        continue;
+      }
+      const vm = /^\s+version\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))/.exec(line);
+      if (vm && currentPkgs.length > 0) {
+        const ver = vm[1] || vm[2] || vm[3];
+        for (const name of currentPkgs) {
+          const k = `${name}@${ver}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          const hit = matchVuln("npm", name, ver, projectOsv);
+          if (hit) out.push(vulnFinding(file, name, ver, hit, i + 1));
+        }
+        currentPkgs = [];
+      }
+    }
+    return out;
+  }
+
+  function auditPnpmLock(file, content, projectOsv) {
+    const out = [];
+    const lines = content.split("\n");
+    const seen = new Set();
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = /^\s{2,4}'?\/?(@?[^/\s':]+(?:\/[^@\s(':]+)?)[@/]([0-9][0-9A-Za-z.\-+]*)/.exec(lines[i]);
+      if (!m) continue;
+      const k = `${m[1]}@${m[2]}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const hit = matchVuln("npm", m[1], m[2], projectOsv);
+      if (hit) out.push(vulnFinding(file, m[1], m[2], hit, i + 1));
+    }
+    return out;
+  }
+
+  function auditCargoLockOrToml(file, content, projectOsv, isLock) {
+    const out = [];
+    const lines = content.split("\n");
+    const seen = new Set();
+    if (isLock) {
+      let curName = "";
+      let curLine = 1;
+      for (let i = 0; i < lines.length; i += 1) {
+        const nm = /^\s*name\s*=\s*"([^"]+)"/.exec(lines[i]);
+        if (nm) {
+          curName = nm[1];
+          curLine = i + 1;
+          continue;
+        }
+        const vm = /^\s*version\s*=\s*"([^"]+)"/.exec(lines[i]);
+        if (vm && curName) {
+          const k = `${curName}@${vm[1]}`;
+          if (!seen.has(k)) {
+            seen.add(k);
+            const hit = matchVuln("cargo", curName, vm[1], projectOsv);
+            if (hit) out.push(vulnFinding(file, curName, vm[1], hit, curLine));
+          }
+          curName = "";
+        }
+      }
+      return out;
+    }
+    let section = "";
+    for (let i = 0; i < lines.length; i += 1) {
+      const t = lines[i].trim();
+      const sm = /^\[([^\]]+)\]/.exec(t);
+      if (sm) {
+        section = sm[1].toLowerCase();
+        continue;
+      }
+      if (!section.endsWith("dependencies")) continue;
+      const dm = /^([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]+)"|\{[^}]*\bversion\s*=\s*"([^"]+)")/.exec(t);
+      if (!dm) continue;
+      const ver = dm[2] || dm[3];
+      if (!ver) continue;
+      const hit = matchVuln("cargo", dm[1], ver, projectOsv);
+      if (hit) out.push(vulnFinding(file, dm[1], ver, hit, i + 1));
+    }
+    return out;
+  }
+
+  function auditComposerLock(file, content, projectOsv) {
+    const out = [];
+    try {
+      const doc = JSON.parse(content);
+      const lineMap = buildPkgLineMap(content);
+      const pkgs = [
+        ...(Array.isArray(doc.packages) ? doc.packages : []),
+        ...(Array.isArray(doc["packages-dev"]) ? doc["packages-dev"] : []),
+      ];
+      for (const p of pkgs) {
+        if (!p || !p.name || !p.version) continue;
+        const ver = String(p.version).replace(/^v/i, "");
+        const hit = matchVuln("composer", p.name, ver, projectOsv);
+        if (hit) out.push(vulnFinding(file, p.name, p.version, hit, lineMap.get(p.name) || 1));
+      }
+    } catch {}
+    return out;
+  }
+
+  function auditGemfileLock(file, content, projectOsv) {
+    const out = [];
+    const lines = content.split("\n");
+    const seen = new Set();
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = /^\s{4}([A-Za-z0-9_.-]+)\s+\(([0-9][0-9A-Za-z.-]*)\)/.exec(lines[i]);
+      if (!m) continue;
+      const k = `${m[1]}@${m[2]}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const hit = matchVuln("rubygems", m[1], m[2], projectOsv);
+      if (hit) out.push(vulnFinding(file, m[1], m[2], hit, i + 1));
+    }
+    return out;
+  }
+
+  function auditPoetryOrPipfileLock(file, content, projectOsv, isPipfile) {
+    const out = [];
+    if (isPipfile) {
+      try {
+        const doc = JSON.parse(content);
+        const lineMap = buildPkgLineMap(content);
+        for (const sec of ["default", "develop"]) {
+          const map = doc[sec];
+          if (!map || typeof map !== "object") continue;
+          for (const [name, info] of Object.entries(map)) {
+            const ver = String(info && info.version ? info.version : "").replace(/^==\s*/, "");
+            if (!ver) continue;
+            const hit = matchVuln("pip", name, ver, projectOsv);
+            if (hit) out.push(vulnFinding(file, name, ver, hit, lineMap.get(name) || 1));
+          }
+        }
+      } catch {}
+      return out;
+    }
+    const lines = content.split("\n");
+    let curName = "";
+    let curLine = 1;
+    for (let i = 0; i < lines.length; i += 1) {
+      const nm = /^name\s*=\s*"([^"]+)"/.exec(lines[i].trim());
+      if (nm) { curName = nm[1]; curLine = i + 1; continue; }
+      const vm = /^version\s*=\s*"([^"]+)"/.exec(lines[i].trim());
+      if (vm && curName) {
+        const hit = matchVuln("pip", curName, vm[1], projectOsv);
+        if (hit) out.push(vulnFinding(file, curName, vm[1], hit, curLine));
+        curName = "";
+      }
+    }
+    return out;
+  }
+
   function auditManifest(file, content, projectOsv) {
     const base = node_path.basename(file).toLowerCase();
     if (base === "package.json") return auditPackageJson(file, content, projectOsv);
     if (base === "package-lock.json") return auditPackageLock(file, content, projectOsv);
+    if (base === "yarn.lock") return auditYarnLock(file, content, projectOsv);
+    if (base === "pnpm-lock.yaml") return auditPnpmLock(file, content, projectOsv);
     if (base === "requirements.txt") return auditRequirements(file, content, projectOsv);
+    if (base === "poetry.lock") return auditPoetryOrPipfileLock(file, content, projectOsv, false);
+    if (base === "pipfile.lock") return auditPoetryOrPipfileLock(file, content, projectOsv, true);
     if (base === "pom.xml") return auditPomXml(file, content, projectOsv);
     if (base === "go.mod") return auditGoMod(file, content, projectOsv);
+    if (base === "cargo.toml") return auditCargoLockOrToml(file, content, projectOsv, false);
+    if (base === "cargo.lock") return auditCargoLockOrToml(file, content, projectOsv, true);
+    if (base === "composer.lock") return auditComposerLock(file, content, projectOsv);
+    if (base === "gemfile.lock") return auditGemfileLock(file, content, projectOsv);
     return [];
   }
 
@@ -3997,14 +4230,14 @@ function registerSecScanHandlers() {
           secSetFileEntry(fileMap, osFile, { ...a, mtime, size });
         } catch {  }
       }
-    } else if (node_path.basename(filePath) === "package.json") {
+    } else if (node_path.basename(filePath).toLowerCase() === "package.json" || SEC_MANIFESTS.has(node_path.basename(filePath).toLowerCase())) {
       let text = typeof content === "string" ? content : null;
       let mtime = Date.now(), size = text ? Buffer.byteLength(text) : 0;
       if (text === null) {
         try { const st = await promises.stat(filePath); mtime = st.mtimeMs; size = st.size; text = await promises.readFile(filePath, "utf8"); } catch { text = null; }
       }
       if (text !== null && size <= SEC_MAX_BYTES) {
-        secSetFileEntry(fileMap, osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text, projectOsv), summaries: [], calls: [], flows: [], mtime, size });
+        secSetFileEntry(fileMap, osFile, { file: osFile, lang: "manifest", single: auditManifest(osFile, text, projectOsv), summaries: [], calls: [], flows: [], mtime, size });
       }
     }
     const res = collectFindings(fileMap, config, baseline, root);
@@ -4038,14 +4271,14 @@ function registerSecScanHandlers() {
           secSetFileEntry(fileMap, osFile, { ...a, mtime, size });
         } catch {  }
       }
-    } else if (node_path.basename(filePath) === "package.json") {
+    } else if (node_path.basename(filePath).toLowerCase() === "package.json" || SEC_MANIFESTS.has(node_path.basename(filePath).toLowerCase())) {
       let text = typeof content === "string" ? content : null;
       let mtime = Date.now(), size = text ? Buffer.byteLength(text) : 0;
       if (text === null) {
         try { const st = await promises.stat(filePath); mtime = st.mtimeMs; size = st.size; text = await promises.readFile(filePath, "utf8"); } catch { text = null; }
       }
       if (text !== null && size <= SEC_MAX_BYTES) {
-        secSetFileEntry(fileMap, osFile, { file: osFile, lang: "json", single: auditPackageJson(osFile, text, projectOsv), summaries: [], calls: [], flows: [], mtime, size });
+        secSetFileEntry(fileMap, osFile, { file: osFile, lang: "manifest", single: auditManifest(osFile, text, projectOsv), summaries: [], calls: [], flows: [], mtime, size });
       }
     }
     return collectFindings(fileMap, config, baseline, root);

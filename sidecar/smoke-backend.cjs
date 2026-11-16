@@ -237,6 +237,26 @@ async function checkSecurityScanControls() {
   try { fsSync.rmSync(isoA, { recursive: true, force: true }); } catch {}
   try { fsSync.rmSync(isoB, { recursive: true, force: true }); } catch {}
 
+  const extScaDir = pathSync.join(osSync.tmpdir(), `wide-osv-ext-${process.pid}`);
+  fsSync.mkdirSync(pathSync.join(extScaDir, '.wide'), { recursive: true });
+  fsSync.writeFileSync(
+    pathSync.join(extScaDir, '.wide', 'osv.json'),
+    JSON.stringify({
+      npm: [{ name: 'minimist', ge: '1.0.0', le: '1.2.5', id: 'CVE-2021-44906', cwe: 'CWE-1321', sev: 'critical', kev: true, epss: 0.81, note: 'inclusive upper bound' }],
+      cargo: [{ name: 'openssl', lt: '0.10.60', id: 'CVE-2023-50001', cwe: 'CWE-119', sev: 'high', note: 'crate bug' }]
+    }),
+    'utf8'
+  );
+  fsSync.writeFileSync(pathSync.join(extScaDir, 'yarn.lock'), '"minimist@^1.2.0":\n  version "1.2.5"\n', 'utf8');
+  fsSync.writeFileSync(pathSync.join(extScaDir, 'Cargo.lock'), '[[package]]\nname = "openssl"\nversion = "0.10.55"\n', 'utf8');
+  const extScan = await invoke('security:scanProject', [extScaDir]);
+  const extFindings = extScan.result?.findings ?? [];
+  const minimistYarn = extFindings.find((f) => f.ruleId === 'vuln-dep-cve-2021-44906');
+  const cargoHit = extFindings.find((f) => f.ruleId === 'vuln-dep-cve-2023-50001');
+  report(Boolean(minimistYarn && String(minimistYarn.message).includes('CISA KEV') && String(minimistYarn.message).includes('newer than 1.2.5')), 'SCA flags inclusive le + yarn.lock + KEV metadata');
+  report(Boolean(cargoHit), 'SCA flags Cargo.lock crates via 8-ecosystem OSV index');
+  try { fsSync.rmSync(extScaDir, { recursive: true, force: true }); } catch {}
+
   try { fsSync.rmSync(dir, { recursive: true, force: true }); } catch {}
   return failed;
 }
