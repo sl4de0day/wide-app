@@ -3755,17 +3755,34 @@ function registerSecScanHandlers() {
     }
     return 0;
   }
+  function osvSevRank(sev) {
+    const s = String(sev || "").toLowerCase();
+    if (s === "critical") return 4;
+    if (s === "high" || s === "error") return 3;
+    if (s === "medium" || s === "warning") return 2;
+    if (s === "low" || s === "info") return 1;
+    return 0;
+  }
   function matchVulnFromBuckets(clean, buckets) {
-    for (const list of buckets) {
+    let best = null;
+    for (let bi = 0; bi < buckets.length; bi += 1) {
+      const list = buckets[bi];
       if (!list) continue;
+      let bucketBest = null;
       for (const v of list) {
         if (v.ge && verCmp(clean, cleanVer(v.ge)) < 0) continue;
         if (v.lt && verCmp(clean, cleanVer(v.lt)) >= 0) continue;
         if (v.le && verCmp(clean, cleanVer(v.le)) > 0) continue;
-        if (v.lt || v.le || v.ge) return v;
+        if (v.lt || v.le || v.ge) {
+          if (!bucketBest || osvSevRank(v.sev) > osvSevRank(bucketBest.sev)) bucketBest = v;
+        }
+      }
+      if (bucketBest) {
+        if (bi === 0) return bucketBest;
+        if (!best || osvSevRank(bucketBest.sev) > osvSevRank(best.sev)) best = bucketBest;
       }
     }
-    return null;
+    return best;
   }
   function matchVuln(eco, name, version, projectOsv) {
     const lname = String(name).toLowerCase();

@@ -21,6 +21,7 @@ const child = cp.spawn(process.execPath, [path.join(__dirname, 'sidecar.cjs')], 
     XDG_CONFIG_HOME: testConfigDir,
     APPDATA: testConfigDir,
     LOCALAPPDATA: testConfigDir,
+    WIDE_NO_AUTO_RULES_SYNC: process.env.WIDE_NO_AUTO_RULES_SYNC || '1',
   },
 });
 let buf = '';
