@@ -31,6 +31,7 @@
     "test:host-win": "powershell -ExecutionPolicy Bypass -File scripts/test-host-win.ps1",
     "sync:ide": "node scripts/sync-shared.cjs --from current --apply",
     "sync:check": "node scripts/sync-shared.cjs --from current --check",
+    "sync:rules": "node scripts/sync-rules.cjs",
     "start": "node scripts/start.cjs",
     "start:linux": "electron scripts/host-linux.cjs",
     "dev:linux": "electron scripts/host-linux.cjs --dev",

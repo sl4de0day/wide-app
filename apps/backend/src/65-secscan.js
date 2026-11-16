@@ -4438,14 +4438,19 @@ function registerSecScanHandlers() {
         void 0;
       }
     }
-        const siblingRules = node_path.resolve(process.cwd(), "../wide-rules/dist/rules.json");
-    try {
-      const raw = JSON.parse(await promises.readFile(siblingRules, "utf8"));
-      const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
-      const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
-      if (filtered.length > 0) return { ok: true, source: siblingRules, count: filtered.length, rules: filtered };
-    } catch {
-      void 0;
+    const bundledCandidates = [
+      node_path.resolve(process.cwd(), "../wide-rules/dist/rules.json"),
+      node_path.resolve(__dirname, "../../resources/rules.json"),
+    ];
+    for (const candidate of bundledCandidates) {
+      try {
+        const raw = JSON.parse(await promises.readFile(candidate, "utf8"));
+        const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
+        const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
+        if (filtered.length > 0) return { ok: true, source: candidate, count: filtered.length, rules: filtered };
+      } catch {
+        void 0;
+      }
     }
     try {
       const raw = JSON.parse(await promises.readFile(SEC_DEFAULT_CACHE_FILE, "utf8"));

@@ -30,6 +30,9 @@ const SHARED_FILES = [
   'scripts/remote-sync.mjs',
   'scripts/test-host-win.ps1',
   'scripts/sync-shared.cjs',
+  'scripts/sync-rules.cjs',
+  'resources/rules.json',
+  'resources/osv-bundle.json',
 ];
 
 const SHARED_DIRS = ['apps/backend/src', 'sidecar'];

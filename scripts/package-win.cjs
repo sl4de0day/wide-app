@@ -6,9 +6,12 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
+const RELEASE = path.join(ROOT, 'release');
 const OUT_DIR = path.join(DIST, 'wide-app-win-x64');
 const ELECTRON_DIST = path.join(ROOT, 'node_modules', 'electron', 'dist');
-const ISCC = process.env.ISCC || (process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Inno Setup 6', 'ISCC.exe') : 'iscc');
+const PROG_ISCC = path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Inno Setup 6', 'ISCC.exe');
+const LOCAL_ISCC = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Inno Setup 6', 'ISCC.exe');
+const ISCC = process.env.ISCC || (process.platform === 'win32' ? (fs.existsSync(PROG_ISCC) ? PROG_ISCC : LOCAL_ISCC) : 'iscc');
 
 if (!fs.existsSync(ELECTRON_DIST)) {
   console.error('Electron distribution not found in node_modules.');
@@ -113,11 +116,21 @@ const assetsDir = path.join(OUT_DIR, 'assets');
 fs.mkdirSync(assetsDir, { recursive: true });
 fs.copyFileSync(path.join(ROOT, 'native-host', 'assets', 'wide.ico'), path.join(assetsDir, 'wide.ico'));
 
-console.log('Compiling Inno Setup installer...');
-cp.execSync(`"${ISCC}" "${path.join(ROOT, 'installer', 'wide-app.iss')}"`, {
-  cwd: ROOT,
-  stdio: 'inherit',
-});
+fs.mkdirSync(RELEASE, { recursive: true });
+if (fs.existsSync(ISCC)) {
+  console.log('Compiling Inno Setup installer...');
+  cp.execSync(`"${ISCC}" "/DAppVersion=${version}" "${path.join(ROOT, 'installer', 'wide-app.iss')}"`, {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
+} else {
+  console.log('Inno Setup not found, creating portable Windows zip archive...');
+  const zipPath = path.join(RELEASE, `Wide-App-${version}-win-x64.zip`);
+  cp.execSync(`powershell -NoProfile -Command "Compress-Archive -Path '${OUT_DIR}\\*' -DestinationPath '${zipPath}' -Force"`, {
+    cwd: ROOT,
+    stdio: 'inherit',
+  });
+}
 
 const generatedExe = path.join(ROOT, 'release', `Wide-App-Setup-${version}.exe`);
 if (fs.existsSync(generatedExe)) {

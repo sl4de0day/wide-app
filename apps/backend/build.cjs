@@ -17,10 +17,18 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+let rootPkg = {};
+try {
+  rootPkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'package.json'), 'utf8'));
+} catch {}
+
 const parts = files.map((name) => {
   const text = fs.readFileSync(path.join(SRC, name), 'utf8');
 
-  const body = text.replace(/^\/\* [^\n]*\n[^\n]*\*\/\n/, '');
+  let body = text.replace(/^\/\* [^\n]*\n[^\n]*\*\/\n/, '');
+  if (name === '64-update.js' && rootPkg.version) {
+    body = body.replace(/^const WIDE_VERSION = "[^"]+";/m, `const WIDE_VERSION = ${JSON.stringify(String(rootPkg.version))};`);
+  }
   return { name, code: body.replace(/\n+$/, '') };
 });
 
