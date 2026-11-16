@@ -8,7 +8,8 @@ const ROOT = path.resolve(__dirname, '..');
 const RELEASE = path.join(ROOT, 'release');
 const DIST = path.join(ROOT, 'dist');
 
-const files = fs.readdirSync(RELEASE).filter((f) => f.includes('0.5151126'));
+const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const files = fs.readdirSync(RELEASE).filter((f) => f.includes(pkg.version));
 files.sort();
 
 const sums = [];
