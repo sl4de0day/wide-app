@@ -8,11 +8,11 @@ const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
 const SOURCE_DIR = path.join(DIST, 'wide-app-linux-x64');
-const VERSION = '0.4141126';
+const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version || '0.5151126';
 const APPIMAGE_NAME = `Wide-App-${VERSION}-x86_64.AppImage`;
 const APPIMAGE_OUT = path.join(DIST, APPIMAGE_NAME);
 const STAGE = path.join(DIST, '.appimage-staging');
-const TAR2SQFS = 'C:\\Users\\yusuf\\Downloads\\squashfs-tools-ng-1.3.2-mingw64\\bin\\tar2sqfs.exe';
+const TAR2SQFS = process.env.TAR2SQFS || (process.platform === 'win32' ? 'tar2sqfs.exe' : 'tar2sqfs');
 
 if (fs.existsSync(STAGE)) {
   fs.rmSync(STAGE, { recursive: true, force: true });
@@ -47,7 +47,7 @@ cp.execSync(`"${TAR2SQFS}" -c zstd -b 131072 -f "${sqfsOut}"`, {
   stdio: ['pipe', 'inherit', 'inherit'],
 });
 
-const origAppImage = 'C:\\Users\\yusuf\\Downloads\\Wide-1.3291026-x86_64.AppImage';
+const origAppImage = process.env.APPIMAGE_RUNTIME || path.join(ROOT, 'resources', 'appimage-runtime-x86_64');
 const origFd = fs.openSync(origAppImage, 'r');
 const runtimeBuf = Buffer.alloc(944632);
 fs.readSync(origFd, runtimeBuf, 0, 944632, 0);

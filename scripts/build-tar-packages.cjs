@@ -7,7 +7,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
-const ZSTD = 'C:\\Users\\yusuf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Meta.Zstandard_Microsoft.Winget.Source_8wekyb3d8bbwe\\zstd-v1.5.7-win64\\zstd.exe';
+const ZSTD = process.env.ZSTD || (process.platform === 'win32' ? 'zstd.exe' : 'zstd');
 
 if (!fs.existsSync(RELEASE)) {
   fs.mkdirSync(RELEASE, { recursive: true });

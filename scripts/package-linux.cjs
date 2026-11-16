@@ -9,8 +9,8 @@ const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
 const OUT_DIR = path.join(DIST, 'wide-app-linux-x64');
 const ELECTRON_DIST = path.join(ROOT, 'node_modules', 'electron', 'dist');
-const LINUX_ZIP = 'C:\\Users\\yusuf\\Downloads\\electron-v41.7.1-linux-x64.zip';
-const ZSTD = 'C:\\Users\\yusuf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Meta.Zstandard_Microsoft.Winget.Source_8wekyb3d8bbwe\\zstd-v1.5.7-win64\\zstd.exe';
+const LINUX_ZIP = process.env.LINUX_ZIP || path.join(DIST, 'electron-linux-x64.zip');
+const ZSTD = process.env.ZSTD || (process.platform === 'win32' ? 'zstd.exe' : 'zstd');
 
 const mainOut = path.join(ROOT, 'out', 'main', 'index.js');
 const rendererOut = path.join(ROOT, 'out', 'renderer', 'index.html');

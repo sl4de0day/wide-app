@@ -8,11 +8,11 @@ const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
 const SOURCE_DIR = path.join(DIST, 'wide-app-linux-x64');
-const VERSION = '0.4141126';
+const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version || '0.5151126';
 const PKG_NAME = `wide-app-${VERSION}-1-x86_64.pkg.tar.zst`;
 const PKG_OUT = path.join(DIST, PKG_NAME);
 const STAGE = path.join(DIST, '.arch-staging');
-const ZSTD = 'C:\\Users\\yusuf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Meta.Zstandard_Microsoft.Winget.Source_8wekyb3d8bbwe\\zstd-v1.5.7-win64\\zstd.exe';
+const ZSTD = process.env.ZSTD || (process.platform === 'win32' ? 'zstd.exe' : 'zstd');
 
 if (fs.existsSync(STAGE)) {
   fs.rmSync(STAGE, { recursive: true, force: true });

@@ -54,7 +54,7 @@
     "@ai-sdk/openai-compatible": "^3.0.92",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "ai": "^7.0.173",
-    "electron": "^41.7.1",
+    "electron": "^45.3.3",
     "esbuild": "^0.28.2",
     "ioredis": "^6.0.0",
     "mysql2": "^3.24.6",

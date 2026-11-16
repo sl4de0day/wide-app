@@ -7,10 +7,10 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const RELEASE = path.join(ROOT, 'release');
-const VERSION = '0.4141126';
+const VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version || '0.5151126';
 const RPM_NAME = `wide-app-${VERSION}-1.x86_64.rpm`;
 const RPM_OUT = path.join(DIST, RPM_NAME);
-const NFPM = 'C:\\Users\\yusuf\\AppData\\Local\\Microsoft\\WinGet\\Packages\\goreleaser.nfpm_Microsoft.Winget.Source_8wekyb3d8bbwe\\nfpm.exe';
+const NFPM = process.env.NFPM || (process.platform === 'win32' ? 'nfpm.exe' : 'nfpm');
 
 fs.mkdirSync(RELEASE, { recursive: true });
 

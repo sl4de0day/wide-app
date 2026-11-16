@@ -8,7 +8,7 @@ const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const OUT_DIR = path.join(DIST, 'wide-app-win-x64');
 const ELECTRON_DIST = path.join(ROOT, 'node_modules', 'electron', 'dist');
-const ISCC = 'C:\\Users\\yusuf\\AppData\\Local\\Programs\\Inno Setup 6\\ISCC.exe';
+const ISCC = process.env.ISCC || (process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Inno Setup 6', 'ISCC.exe') : 'iscc');
 
 if (!fs.existsSync(ELECTRON_DIST)) {
   console.error('Electron distribution not found in node_modules.');
