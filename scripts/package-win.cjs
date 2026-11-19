@@ -14,6 +14,12 @@ const LOCAL_ISCC = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Inno S
 const ISCC = process.env.ISCC || (process.platform === 'win32' ? (fs.existsSync(PROG_ISCC) ? PROG_ISCC : LOCAL_ISCC) : 'iscc');
 
 if (!fs.existsSync(ELECTRON_DIST)) {
+  const installer = path.join(ROOT, 'node_modules', 'electron', 'install.js');
+  if (fs.existsSync(installer)) {
+    cp.execFileSync(process.execPath, [installer], { cwd: ROOT, stdio: 'inherit' });
+  }
+}
+if (!fs.existsSync(ELECTRON_DIST)) {
   console.error('Electron distribution not found in node_modules.');
   process.exit(1);
 }

@@ -112,3 +112,22 @@ jobs:
               gh release create "$TAG" "${ASSETS[@]}" --title "Wide App $TAG" --generate-notes
             fi
           fi
+
+  finalize-checksums:
+    name: Publish Combined SHA256SUMS
+    needs: [release-linux, release-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate and Upload Combined SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          mkdir -p merged
+          gh release download "$TAG" -R "$REPO" -D merged --clobber
+          rm -f merged/SHA256SUMS
+          (cd merged && LC_ALL=C sha256sum * | sort > SHA256SUMS)
+          cat merged/SHA256SUMS
+          gh release upload "$TAG" merged/SHA256SUMS -R "$REPO" --clobber

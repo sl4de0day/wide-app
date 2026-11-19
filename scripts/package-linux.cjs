@@ -25,6 +25,13 @@ if (fs.existsSync(OUT_DIR)) {
 fs.mkdirSync(OUT_DIR, { recursive: true });
 fs.mkdirSync(RELEASE, { recursive: true });
 
+if (!fs.existsSync(LINUX_ZIP) && !fs.existsSync(ELECTRON_DIST)) {
+  const installer = path.join(ROOT, 'node_modules', 'electron', 'install.js');
+  if (fs.existsSync(installer)) {
+    cp.execFileSync(process.execPath, [installer], { cwd: ROOT, stdio: 'inherit' });
+  }
+}
+
 if (fs.existsSync(LINUX_ZIP)) {
   console.log('Linux Electron zip arsivi aciliyor...');
   cp.execSync(`tar -xf "${LINUX_ZIP}" -C "${OUT_DIR}"`, { stdio: 'inherit' });
