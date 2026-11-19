@@ -94,6 +94,15 @@ const lspServers = new Map();
 
 const lspDocuments = new Map();
 
+const lspDiagnosticsCache =
+  typeof __wideTs === "object" && __wideTs?.LspDiagnosticsCache
+    ? new __wideTs.LspDiagnosticsCache()
+    : new Map();
+
+function lspGetCachedDiagnostics(filePath) {
+  return lspDiagnosticsCache.get(node_path.resolve(String(filePath || ""))) || [];
+}
+
 function lspFileUri(filePath) {
   const posix = filePath.split("\\").join("/").replace(/^\/+/, "");
 
@@ -302,6 +311,7 @@ function handleLspNotification(connection, message) {
         message: item.source ? `${item.message} (${item.source})` : item.message,
       };
     });
+    lspDiagnosticsCache.set(node_path.resolve(filePath), diagnostics);
     lspEmit("lsp:diagnostics", { path: filePath, diagnostics, server: connection.spec.id });
   }
 }

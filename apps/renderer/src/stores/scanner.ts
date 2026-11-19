@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { enumerateInsertionPoints } from "@/components/http/Inspector";
 import { crawl } from "@/lib/activeScan/crawler";
 import { runScan, type ScanIssue } from "@/lib/activeScan/runner";
+import { bridge } from "@/lib/bridge";
 
 import { useFindings } from "./findings";
 import { useOast } from "./oast";
@@ -19,10 +20,20 @@ export interface ScanTask {
   startedAt: number;
 }
 
+export interface CrawlSettings {
+  mode: "standard" | "headless";
+  fieldScope: "rdn" | "fqdn";
+  robotsAndSitemap: boolean;
+  probePaths: boolean;
+  filterSimilar: boolean;
+}
+
 interface ScannerState {
   tasks: ScanTask[];
   issues: ScanIssue[];
   selected: string | null;
+  crawlSettings: CrawlSettings;
+  setCrawlSettings(patch: Partial<CrawlSettings>): void;
   scan(requestText: string, onDone?: (issues: ScanIssue[]) => void): void;
 
   crawlScan(seedUrl: string): void;
@@ -74,6 +85,16 @@ export const useScanner = create<ScannerState>((set, get) => ({
   issues: [],
   selected: null,
   session: loadSession(),
+  crawlSettings: {
+    mode: "standard",
+    fieldScope: "rdn",
+    robotsAndSitemap: true,
+    probePaths: true,
+    filterSimilar: true,
+  },
+
+  setCrawlSettings: (patch) =>
+    set((s) => ({ crawlSettings: { ...s.crawlSettings, ...patch } })),
 
   setSession: (text) => {
     try {
@@ -149,7 +170,13 @@ export const useScanner = create<ScannerState>((set, get) => ({
     }
     const task: ScanTask = { id, target: `Crawl ${host}`, requestText: seedUrl, status: "running", done: 0, total: 60, issueCount: 0, signal, startedAt: Date.now() };
     set((s) => ({ tasks: [task, ...s.tasks] }));
+    const cs = get().crawlSettings;
     void crawl(seedUrl, {
+      mode: cs.mode,
+      fieldScope: cs.fieldScope,
+      robotsAndSitemap: cs.robotsAndSitemap,
+      probePaths: cs.probePaths,
+      filterSimilar: cs.filterSimilar,
       signal,
       sessionHeaders: parseSession(get().session),
       onProgress: (visited, queued) =>
@@ -186,6 +213,7 @@ export const useScanner = create<ScannerState>((set, get) => ({
 
   cancelAll: () => {
     for (const t of get().tasks) t.signal.cancelled = true;
+    void bridge.reconCrawlCancel?.().catch(() => {});
     set((s) => ({ tasks: s.tasks.map((t) => (t.status === "running" ? { ...t, status: "cancelled" } : t)) }));
   },
 

@@ -317,6 +317,104 @@ export interface ProxyEntry {
 
   websocket?: boolean;
   frames?: ProxyWsFrame[];
+  endpointClass?: string;
+  technologies?: string[];
+  securityIssueCount?: number;
+  jwtCount?: number;
+  secretCount?: number;
+  inspectSummary?: {
+    action: string;
+    trigger: string | null;
+    scores: Record<string, number>;
+    hitCount: number;
+    smugglingVectors: string[];
+  };
+}
+
+export interface ProxyInspectionReport {
+  action: "pass" | "log" | "block" | "drop" | "reject";
+  trigger: string | null;
+  scores: Record<string, number>;
+  hits: Array<{
+    ruleId: number;
+    msg: string;
+    zone: string;
+    part: string;
+    name: string;
+    count: number;
+    appliedScores: Record<string, number>;
+    sample: string;
+  }>;
+  signals: Record<string, boolean>;
+  smugglingVectors: string[];
+  suppressed: number;
+  expiredExceptions: number;
+  uninspected: string | null;
+  drafts: Array<{
+    ruleId: number;
+    zone: string;
+    part: string;
+    fieldName: string;
+    sample: string;
+    topCategory: string;
+    suggestedAdjustment: number;
+    until: string;
+    snippet: string;
+  }>;
+}
+
+export interface ReconCrawlConfig {
+  seeds?: string[];
+  seedUrl?: string;
+  mode?: "standard" | "headless" | "hybrid";
+  maxDepth?: number;
+  maxPages?: number;
+  concurrency?: number;
+  rateLimit?: number;
+  jsCrawl?: boolean;
+  robotsAndSitemap?: boolean;
+  probePaths?: boolean;
+  pathClimb?: boolean;
+  filterSimilar?: boolean;
+  useBm25?: boolean;
+  fieldScope?: "rdn" | "fqdn" | "dn";
+  allowPrivate?: boolean;
+  tlsProfile?: "none" | "chrome" | "firefox" | "safari";
+  headers?: [string, string][];
+}
+
+export interface ReconCrawlEvent {
+  crawlId: string;
+  type: "progress" | "page" | "done" | "error";
+  visited?: number;
+  queued?: number;
+  active?: number;
+  pages?: number;
+  url?: string;
+  message?: string;
+  page?: {
+    url: string;
+    finalUrl: string;
+    fingerprint: string;
+    status: number;
+    depth: number;
+    title: string;
+    contentType: string;
+    links: string[];
+    forms: { action: string; method: string; fields: { name: string; type: string }[] }[];
+    audit?: {
+      endpointClass?: string | null;
+      technologies?: string[];
+      securityHeaders?: unknown[];
+      jwtTokens?: unknown[];
+      secrets?: unknown[];
+    };
+  };
+  graph?: {
+    nodes: { id: number; url: string; title: string; status: number; depth: number }[];
+    edges: { from: number; to: number; action: string }[];
+    dot: string;
+  };
 }
 
 
@@ -688,17 +786,31 @@ export interface AiBrowserProgressEvent {
   installing: boolean;
 }
 
+export type AiToolMode = "full" | "code" | "security";
+export type AiInteractionMode = "agent" | "ask";
+
+export interface AiVerificationDiagnostic {
+  source: string;
+  line: number;
+  col: number;
+  severity: string;
+  code?: string;
+  message: string;
+}
+
 export type AiEvent =
   | { id: string; type: "text"; text: string }
   | { id: string; type: "thinking"; text: string }
-  | { id: string; type: "tool_start"; name: string; input: unknown }
-  | { id: string; type: "tool_end"; name: string; result: string }
-  | { id: string; type: "usage"; input: number; output: number; total: number }
-  | { id: string; type: "error"; message: string }
+  | { id: string; type: "tool_start"; name: string; input: unknown; parentToolUseId?: string }
+  | { id: string; type: "tool_end"; name: string; result: string; error?: boolean; parentToolUseId?: string }
+  | { id: string; type: "usage"; input: number; output: number; total: number; cacheRead?: number; cacheCreation?: number; costUsd?: number; durationMs?: number }
+  | { id: string; type: "error"; message: string; errorKind?: string }
+  | { id: string; type: "prompt_suggestion"; suggestions: string[] }
   | { id: string; type: "done" }
   | { id: string; type: "open"; path: string; line: number }
   | { id: string; type: "file_read"; root?: string; path: string; content: string }
-  | { id: string; type: "edit"; root?: string; path: string; oldContent?: string; content: string; existed?: boolean; added?: number; removed?: number }
+  | { id: string; type: "edit"; root?: string; path: string; oldContent?: string; content: string; existed?: boolean; staged?: boolean; added?: number; removed?: number }
+  | { id: string; type: "verification"; path: string; relativePath?: string; ok: boolean; errors: number; warnings: number; diagnostics?: AiVerificationDiagnostic[] }
   | { id: string; type: "open_tool"; tool: string; subtool?: string }
   | {
       id?: string;
@@ -809,36 +921,29 @@ export interface AiModelFile {
   fit?: "gpu" | "cpu" | "no" | "unknown";
 }
 
-export interface OpenCodeServerState {
-  running: boolean;
-  starting: boolean;
-  port: number;
-  version: string;
-  api: "" | "v1" | "v2";
-  source: "" | "cli" | "desktop";
-  since: number;
-  error: string;
+export interface AiCodexEffortOption {
+  reasoningEffort: string;
+  description: string;
 }
 
-export interface OpenCodeModel {
-  key: string;
+export interface AiCodexModel {
   id: string;
-  providerId: string;
-  providerName: string;
-  name: string;
-  free: boolean;
-  reasoning: boolean;
-  tools: boolean;
-  context: number;
-  output: number;
+  model: string;
+  displayName: string;
+  description?: string;
+  supportedReasoningEfforts: AiCodexEffortOption[];
+  defaultReasoningEffort: string;
+  isDefault?: boolean;
 }
 
-export interface OpenCodeModelsReply {
-  models: OpenCodeModel[];
-  defaultModel: string;
-  selectedModel: string;
-  api?: "v1" | "v2";
+export interface AiCodexStatus {
+  installed?: boolean;
+  signedIn?: boolean;
   version?: string;
+  email?: string;
+  planType?: string;
+  models?: AiCodexModel[];
+  path?: string;
 }
 
 export interface AiHardware {
@@ -890,12 +995,50 @@ export interface AiMessage {
   [extra: string]: unknown;
 }
 
+export type AiClaudeEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface AiAntigravityModelFamily {
+  id: string;
+  label: string;
+  variants: Partial<Record<AiClaudeEffort, string>>;
+  rawIds: string[];
+}
+
+export interface AiAntigravityStatus {
+  installed?: boolean;
+  signedIn?: boolean;
+  version?: string;
+  account?: string;
+  mcpAttached?: boolean;
+  models?: AiAntigravityModelFamily[];
+  path?: string;
+}
+
+export interface AiClaudeCodeStatus {
+  installed?: boolean;
+  path?: string;
+  signedIn?: boolean;
+  loggedIn?: boolean;
+  authMethod?: string;
+  apiProvider?: string;
+  email?: string;
+  subscriptionType?: string;
+}
+
 export interface AiConfig {
   tab: "cloud" | "local";
   provider: string;
   cloudModel: Record<string, string>;
   localModel: string;
   allowWrites: boolean;
+  toolMode?: AiToolMode;
+  interactionMode?: AiInteractionMode;
+  allowBrowser?: boolean;
+  claudeCodeSignedIn?: boolean;
+  claudeEffort?: AiClaudeEffort;
+  claudeFallbackModel?: string;
+  antigravityEffort?: AiClaudeEffort;
+  codexEffort?: string;
 }
 
 export interface HostApi {
@@ -1184,7 +1327,13 @@ export interface HostApi {
       headers: [string, string][];
       body: string;
     },
-    options?: { followRedirects?: boolean; session?: boolean; http2?: boolean },
+    options?: {
+      followRedirects?: boolean;
+      session?: boolean;
+      http2?: boolean;
+      tlsProfile?: "none" | "chrome" | "firefox" | "safari";
+      allowPrivate?: boolean;
+    },
   ): Promise<
     Ok<{
       status?: number;
@@ -1252,6 +1401,43 @@ export interface HostApi {
   proxySetSessionMacro(macro: { steps: MacroStep[]; extract?: MacroExtract[] } | null): Promise<Ok<{ active?: boolean }>>;
   proxyRefreshSession(): Promise<Ok<{ cookies?: [string, string][]; tokens?: [string, string][] }>>;
   proxySessionStatus(): Promise<Ok<{ active?: boolean; cookies?: [string, string][] }>>;
+
+  reconStatus(): Promise<Ok<{ nativeBinary?: string | null; engines?: string[]; activeCrawls?: string[] }>>;
+  reconCrawlStart(config: ReconCrawlConfig): Promise<Ok<{ crawlId?: string; visited?: number; pages?: number; graph?: ReconCrawlEvent["graph"] }>>;
+  reconCrawlCancel(crawlId?: string): Promise<Ok<{ crawlId?: string; cancelledAll?: boolean }>>;
+  reconAuditResponse(input: {
+    url: string;
+    method?: string;
+    headers?: [string, string][] | Record<string, string>;
+    body?: string;
+    extractLinks?: boolean;
+  }): Promise<Ok<{ engine?: string; audit?: unknown; links?: { url: string; source: string; tag: string }[]; forms?: unknown[] }>>;
+  reconNormalizePaths(urls: string[], threshold?: number): Promise<{ fingerprints: string[] }>;
+  reconCheckScope(input: {
+    url: string;
+    rootHostname: string;
+    fieldScope?: "rdn" | "fqdn" | "dn";
+    allowPrivate?: boolean;
+  }): Promise<{ allowed: boolean; internalHost: boolean; registrableRoot: string }>;
+  reconDetectTech(headers: [string, string][] | Record<string, string>, body: string): Promise<Ok<{ technologies?: string[] }>>;
+  reconStateGraph(
+    transitions: { fromUrl?: string | null; toUrl: string; title?: string; status?: number; depth?: number; body?: string; action?: string }[],
+    threshold?: number,
+  ): Promise<Ok<NonNullable<ReconCrawlEvent["graph"]>>>;
+  onReconEvent: Subscriber<ReconCrawlEvent>;
+  onReconPassive: Subscriber<{
+    entryId: number;
+    url: string;
+    endpointClass?: string | null;
+    technologies?: string[];
+    securityIssueCount?: number;
+    jwtCount?: number;
+    secretCount?: number;
+    inspectSummary?: ProxyEntry["inspectSummary"];
+  }>;
+  proxyInspectTraffic(input: number | { url: string; method?: string; headers?: [string, string][] | Record<string, string>; body?: string; rawRequest?: string }, opts?: { learning?: boolean; level?: number }): Promise<Ok<ProxyInspectionReport>>;
+  proxyInspectReport(opts?: { entries?: ProxyEntry[]; learning?: boolean; level?: number }): Promise<Ok<{ inspected: number; flagged: number; results: ProxyInspectionReport[]; drafts: ProxyInspectionReport["drafts"] }>>;
+  proxyTestSmuggling(input: { rawRequest?: string; rawResponse?: string; method?: string; headers?: [string, string][] }): Promise<Ok<{ requestReport: unknown; responseReport: unknown; headerVectors: string[] }>>;
 
 
 
@@ -1390,9 +1576,6 @@ export interface HostApi {
 
 
   aiConfig(patch?: Partial<AiConfig>): Promise<Ok<{ config?: AiConfig }>>;
-  aiKeyStatus(): Promise<Ok<{ configured?: Record<string, boolean> }>>;
-  aiSetKey(provider: string, key: string): Promise<Ok<{ configured?: boolean }>>;
-  aiVerifyKey(provider: string, key: string): Promise<Ok<{ models?: string[] }>>;
   aiSessions(root: string): Promise<Ok<{ sessions?: AiSessionMeta[] }>>;
   aiSession(id: string): Promise<Ok<{ session?: AiSession }>>;
   aiNewSession(root: string): Promise<Ok<{ session?: AiSession }>>;
@@ -1402,17 +1585,27 @@ export interface HostApi {
   aiDeleteSession(id: string): Promise<Ok>;
   aiSend(request: {
     id: string;
+    sessionId?: string;
     root: string;
     provider: string;
     model: string;
+    fallbackModel?: string;
     messages: AiMessage[];
     system: string;
     effort?: "fast" | "thinking";
+    claudeEffort?: AiClaudeEffort;
+    antigravityEffort?: AiClaudeEffort;
+    codexEffort?: string;
     language?: string;
     activeFile?: string | null;
     openTabs?: Array<{ name: string; path?: string; kind?: string; active?: boolean }>;
+    toolMode?: AiToolMode;
+    interactionMode?: AiInteractionMode;
+    allowBrowser?: boolean;
+    reviewEnabled?: boolean;
   }): Promise<Ok<{ answered?: boolean }>>;
   aiCompact(request: {
+    sessionId?: string;
     provider: string;
     model: string;
     messages: Array<{ role: string; text?: string; content?: string }>;
@@ -1461,25 +1654,23 @@ export interface HostApi {
 
 
 
-  aiClaudeCodeStatus(): Promise<Ok<{ installed?: boolean; path?: string; signedIn?: boolean }>>;
+  aiClaudeCodeStatus(): Promise<Ok<AiClaudeCodeStatus>>;
   aiClaudeCodeInstall(): Promise<Ok<{ path?: string }>>;
-  aiClaudeCodeLogin(): Promise<Ok<{ started?: boolean }>>;
-  aiOpenCodeStatus(fresh?: boolean): Promise<
-    Ok<{
-      installed?: boolean;
-      broken?: boolean;
-      path?: string;
-      version?: string;
-      source?: "cli" | "desktop";
-      api?: "v1" | "v2";
-      found?: { path: string; version: string; source: "cli" | "desktop" }[];
-    }>
-  >;
-  aiOpenCodeInstall(): Promise<Ok<{ path?: string; version?: string }>>;
-  aiOpenCodeServer(): Promise<Ok<OpenCodeServerState>>;
-  aiOpenCodeStart(): Promise<Ok<OpenCodeServerState>>;
-  aiOpenCodeStop(): Promise<Ok<OpenCodeServerState>>;
-  aiOpenCodeModels(fresh?: boolean): Promise<Ok<OpenCodeModelsReply>>;
+  aiClaudeCodeLogin(): Promise<Ok<{ started?: boolean; signedIn?: boolean; alreadySignedIn?: boolean } & AiClaudeCodeStatus>>;
+  aiClaudeCodeLogout(): Promise<Ok<{ signedIn?: boolean; loggedIn?: boolean }>>;
+  aiCloseClaudeSession(id: string): Promise<Ok>;
+  aiAntigravityStatus(opts?: { force?: boolean }): Promise<Ok<AiAntigravityStatus>>;
+  aiAntigravityModels(): Promise<Ok<{ models?: AiAntigravityModelFamily[] }>>;
+  aiAntigravityInstall(): Promise<Ok<{ output?: string; status?: AiAntigravityStatus }>>;
+  aiAntigravityLogin(): Promise<Ok<{ started?: boolean }>>;
+  aiAntigravityAttachMcp(): Promise<Ok<{ status?: AiAntigravityStatus }>>;
+  aiCloseAntigravitySession(id: string): Promise<Ok>;
+  aiCodexStatus(opts?: { force?: boolean }): Promise<Ok<AiCodexStatus>>;
+  aiCodexModels(): Promise<Ok<{ models?: AiCodexModel[] }>>;
+  aiCodexInstall(): Promise<Ok<{ output?: string; status?: AiCodexStatus }>>;
+  aiCodexLogin(): Promise<Ok<{ started?: boolean }>>;
+  aiCodexLogout(): Promise<Ok<{ signedIn?: boolean }>>;
+  aiCloseCodexSession(id: string): Promise<Ok>;
   onAiEvent: Subscriber<AiEvent>;
   onAiPull: Subscriber<AiPullEvent>;
   aiPermissionReply(requestId: string, allowed: boolean, reason?: string): Promise<Ok>;
@@ -1951,6 +2142,28 @@ const fallback = {
   proxySetSessionMacro: async () => (warn(), { ok: false, error: "No bridge" }),
   proxyRefreshSession: async () => (warn(), { ok: false, error: "No bridge" }),
   proxySessionStatus: async () => (warn(), { ok: false, error: "No bridge" }),
+  reconStatus: async () => (warn(), { ok: false, error: "No bridge" }),
+  reconCrawlStart: async () => (warn(), { ok: false, error: "No bridge" }),
+  reconCrawlCancel: async () => (warn(), { ok: false, error: "No bridge" }),
+  reconAuditResponse: async () => (warn(), { ok: false, error: "No bridge" }),
+  reconNormalizePaths: async (urls: string[]) => (warn(), { fingerprints: urls }),
+  reconCheckScope: async () => (warn(), { allowed: false, internalHost: false, registrableRoot: "" }),
+  reconDetectTech: async () => (warn(), { ok: false, error: "No bridge" }),
+  reconStateGraph: async () => (warn(), { ok: false, error: "No bridge" }),
+  onReconEvent: noSub<ReconCrawlEvent>(),
+  onReconPassive: noSub<{
+    entryId: number;
+    url: string;
+    endpointClass?: string | null;
+    technologies?: string[];
+    securityIssueCount?: number;
+    jwtCount?: number;
+    secretCount?: number;
+    inspectSummary?: ProxyEntry["inspectSummary"];
+  }>(),
+  proxyInspectTraffic: async () => (warn(), { ok: false, error: "No bridge" }),
+  proxyInspectReport: async () => (warn(), { ok: false, error: "No bridge" }),
+  proxyTestSmuggling: async () => (warn(), { ok: false, error: "No bridge" }),
   debugStart: async () => (warn(), { ok: false, error: "No bridge" }),
   debugStartBrowser: async () => (warn(), { ok: false, error: "No bridge" }),
   debugStop: async () => (warn(), { ok: false, error: "No bridge" }),
@@ -2031,9 +2244,6 @@ const fallback = {
   extensionSetSettings: async () => (warn(), { ok: false, error: "No bridge" }),
 
   aiConfig: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiKeyStatus: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiSetKey: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiVerifyKey: async () => (warn(), { ok: false, error: "No bridge" }),
   aiSessions: async () => (warn(), { ok: false, error: "No bridge" }),
   aiSession: async () => (warn(), { ok: false, error: "No bridge" }),
   aiNewSession: async () => (warn(), { ok: false, error: "No bridge" }),
@@ -2059,12 +2269,20 @@ const fallback = {
   aiClaudeCodeStatus: async () => (warn(), { ok: false, error: "No bridge" }),
   aiClaudeCodeInstall: async () => (warn(), { ok: false, error: "No bridge" }),
   aiClaudeCodeLogin: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiOpenCodeStatus: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiOpenCodeInstall: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiOpenCodeServer: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiOpenCodeStart: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiOpenCodeStop: async () => (warn(), { ok: false, error: "No bridge" }),
-  aiOpenCodeModels: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiClaudeCodeLogout: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCloseClaudeSession: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiAntigravityStatus: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiAntigravityModels: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiAntigravityInstall: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiAntigravityLogin: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiAntigravityAttachMcp: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCloseAntigravitySession: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCodexStatus: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCodexModels: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCodexInstall: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCodexLogin: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCodexLogout: async () => (warn(), { ok: false, error: "No bridge" }),
+  aiCloseCodexSession: async () => (warn(), { ok: false, error: "No bridge" }),
   onAiEvent: noSub<AiEvent>(),
   onAiPull: noSub<AiPullEvent>(),
   aiPermissionReply: async () => (warn(), { ok: false, error: "No bridge" }),

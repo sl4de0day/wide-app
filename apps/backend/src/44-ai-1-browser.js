@@ -14,6 +14,7 @@ const aiBrowserSession = {
   canGoForward: false,
   proxyPort: 0,
   stealth: false,
+  fastRead: false,
   browserLabel: "",
   installing: false,
   installStatus: "",
@@ -35,6 +36,8 @@ const aiBrowserRuntime = {
   consoleLogs: [],
   networkRequests: new Map(),
   harEntries: [],
+  xhrResponses: [],
+  stateGraph: null,
   harStartedAt: "",
   lastFrameAt: 0,
   emitFn: null,
@@ -43,6 +46,8 @@ const aiBrowserRuntime = {
   closing: false,
   launchPromise: null,
   installPromise: null,
+  fastRead: false,
+  routeHooked: false,
 };
 
 const AI_BROWSER_EMOJI_ZWJ_RE = /(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u2600-\u27BF])(?:\uFE0F|\uFE0E|[\u{1F3FB}-\u{1F3FF}])?(?:\u200D(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u2600-\u27BF])(?:\uFE0F|\uFE0E|[\u{1F3FB}-\u{1F3FF}])?)+/gu;
@@ -431,8 +436,8 @@ async function aiBrowserSaveStorageState() {
   if (!target) return;
   try {
     await aiBrowserRuntime.context.storageState({ path: target });
-  } catch {
-    void 0;
+  } catch (error) {
+    reportRecoverableError("ai-browser", "save storageState failed", error);
   }
 }
 
@@ -537,6 +542,7 @@ function aiBrowserEmitAction(action, target, extra = {}) {
 async function aiBrowserAttachPage(page, context) {
   aiBrowserRuntime.page = page;
   aiBrowserRuntime.context = context;
+  aiBrowserRuntime.routeHooked = false;
 
   page.on("console", (msg) => {
     const type = msg.type();
@@ -563,13 +569,38 @@ async function aiBrowserAttachPage(page, context) {
   });
   page.on("framenavigated", (frame) => {
     if (frame === page.mainFrame()) {
-      aiBrowserSession.url = frame.url() || aiBrowserSession.url;
+      const prevUrl = aiBrowserSession.url && aiBrowserSession.url !== "about:blank" ? aiBrowserSession.url : null;
+      const nextUrl = frame.url() || aiBrowserSession.url;
+      aiBrowserSession.url = nextUrl;
+      try {
+        if (__wideTs?.StateGraph) {
+          if (!aiBrowserRuntime.stateGraph) aiBrowserRuntime.stateGraph = new __wideTs.StateGraph(4);
+          if (nextUrl && /^https?:\/\//i.test(nextUrl)) {
+            aiBrowserRuntime.stateGraph.recordTransition(
+              prevUrl && /^https?:\/\//i.test(prevUrl) ? prevUrl : null,
+              nextUrl,
+              aiBrowserSession.title || "",
+              200,
+              0,
+              "",
+              aiBrowserSession.lastAction || "navigate",
+            );
+          }
+        }
+      } catch {}
       void aiBrowserSyncNavState().then(() => aiBrowserEmitFrame(true));
     }
   });
   page.on("load", () => {
     aiBrowserSession.loading = false;
-    void aiBrowserSyncNavState().then(() => {
+    void aiBrowserSyncNavState().then(async () => {
+      try {
+        if (__wideTs?.StateGraph && aiBrowserSession.url && /^https?:\/\//i.test(aiBrowserSession.url) && !page.isClosed()) {
+          if (!aiBrowserRuntime.stateGraph) aiBrowserRuntime.stateGraph = new __wideTs.StateGraph(4);
+          const html = await page.content().catch(() => "");
+          aiBrowserRuntime.stateGraph.recordTransition(null, aiBrowserSession.url, aiBrowserSession.title || "", 200, 0, html, "load");
+        }
+      } catch {}
       aiBrowserEmitFrame(true);
       void aiBrowserSaveStorageState();
     });
@@ -637,8 +668,8 @@ async function aiBrowserAttachPage(page, context) {
           rec.response = evt.response || null;
           rec.endTimestamp = Number(evt.timestamp || rec.startTimestamp || 0);
         }
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("ai-browser", "process Network.responseReceived failed", error);
       }
     });
     const finalizeHarRequest = (requestId, endTimestamp, encodedLength, failedText = "") => {
@@ -696,12 +727,36 @@ async function aiBrowserAttachPage(page, context) {
         if (aiBrowserRuntime.harEntries.length > 500) {
           aiBrowserRuntime.harEntries.splice(0, aiBrowserRuntime.harEntries.length - 500);
         }
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("ai-browser", "finalize HAR entry failed", error);
       }
     };
     cdp.on("Network.loadingFinished", (evt) => {
-      finalizeHarRequest(evt?.requestId, evt?.timestamp, evt?.encodedDataLength, "");
+      const reqId = evt?.requestId;
+      const rec = reqId ? aiBrowserRuntime.networkRequests.get(reqId) : null;
+      const mime = String(rec?.response?.mimeType || "").toLowerCase();
+      if (reqId && rec && (mime.includes("json") || mime.includes("javascript") || mime.includes("xml") || mime.includes("ecmascript"))) {
+        void cdp
+          .send("Network.getResponseBody", { requestId: reqId })
+          .then((bodyRes) => {
+            const raw = bodyRes?.base64Encoded
+              ? Buffer.from(bodyRes.body || "", "base64").toString("utf8")
+              : String(bodyRes?.body || "");
+            aiBrowserRuntime.xhrResponses.push({
+              url: String(rec.request?.url || ""),
+              method: String(rec.request?.method || "GET"),
+              status: Number(rec.response?.status || 0),
+              mimeType: mime,
+              body: raw.slice(0, 8192),
+              ts: Date.now(),
+            });
+            if (aiBrowserRuntime.xhrResponses.length > 40) {
+              aiBrowserRuntime.xhrResponses.splice(0, aiBrowserRuntime.xhrResponses.length - 40);
+            }
+          })
+          .catch(() => {});
+      }
+      finalizeHarRequest(reqId, evt?.timestamp, evt?.encodedDataLength, "");
     });
     cdp.on("Network.loadingFailed", (evt) => {
       finalizeHarRequest(evt?.requestId, evt?.timestamp, 0, evt?.errorText || "Failed");
@@ -715,8 +770,8 @@ async function aiBrowserAttachPage(page, context) {
           aiBrowserSession.screenshot = `data:image/jpeg;base64,${evt.data}`;
           aiBrowserEmitFrame(false);
         }
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("ai-browser", "screencast frame update failed", error);
       }
     });
     await cdp.send("Network.enable").catch(() => {});
@@ -1059,6 +1114,30 @@ async function aiCaptureLiveScreenshot(page, fullPage = false) {
   }
 }
 
+async function aiBrowserApplyFastRead(page, fastRead) {
+  if (typeof fastRead === "boolean") {
+    aiBrowserRuntime.fastRead = fastRead;
+  }
+  aiBrowserSession.fastRead = Boolean(aiBrowserRuntime.fastRead);
+  if (!aiBrowserRuntime.fastRead || aiBrowserRuntime.routeHooked || !page || typeof page.route !== "function") {
+    return;
+  }
+  aiBrowserRuntime.routeHooked = true;
+  await page
+    .route("**/*", (route) => {
+      if (aiBrowserRuntime.fastRead && __wideTs?.shouldBlockFastReadRequest) {
+        const req = route.request();
+        if (__wideTs.shouldBlockFastReadRequest(req.resourceType(), req.url())) {
+          return route.abort();
+        }
+      }
+      return route.continue();
+    })
+    .catch(() => {
+      aiBrowserRuntime.routeHooked = false;
+    });
+}
+
 async function aiExecuteBrowserOpen(input = {}, emit) {
   if (emit) aiBrowserRuntime.emitFn = emit;
   const targetUrl = aiNormalizeBrowserUrl(input.url);
@@ -1078,6 +1157,7 @@ async function aiExecuteBrowserOpen(input = {}, emit) {
       stealth: typeof input.stealth === "boolean" ? input.stealth : undefined,
       emit,
     });
+    await aiBrowserApplyFastRead(page, input.fastRead);
 
     if (targetUrl) {
       await page.goto(targetUrl, {
@@ -1113,6 +1193,7 @@ async function aiExecuteBrowserNavigate(url, emit, opts = {}) {
 
   try {
     const page = await aiBrowserEnsureReady({ emit });
+    await aiBrowserApplyFastRead(page, opts.fastRead);
     const waitUntil = opts.waitUntil === "networkidle" || opts.waitUntil === "load" ? opts.waitUntil : "domcontentloaded";
     const resp = await page.goto(target, { waitUntil, timeout: 30000 });
     await page.waitForTimeout(300);
@@ -1353,7 +1434,7 @@ async function aiExecuteBrowserWait(input = {}, emit) {
   }
 }
 
-async function aiExecuteBrowserExtract(selector, mode = "snapshot", emit) {
+async function aiExecuteBrowserExtract(selector, mode = "snapshot", emit, opts = {}) {
   if (!aiBrowserRuntime.page || aiBrowserRuntime.page.isClosed()) {
     if (mode === "text" && !aiBrowserSession.open) {
       return `URL: ${aiBrowserSession.url}\nTitle: ${aiBrowserSession.title}\n(No page loaded yet)`;
@@ -1365,6 +1446,36 @@ async function aiExecuteBrowserExtract(selector, mode = "snapshot", emit) {
   const m = String(mode || "snapshot").toLowerCase();
 
   try {
+    if (m === "article" || m === "clean_text" || opts?.cleanText) {
+      const pageUrl = page.url() || aiBrowserSession.url;
+      const html = selector
+        ? await page.locator(selector).first().innerHTML({ timeout: 5000 })
+        : await page.content();
+      if (__wideTs?.extractArticleFromHtml) {
+        const article = __wideTs.extractArticleFromHtml(String(html || ""), pageUrl);
+        aiBrowserEmitAction("extract", m === "article" ? "article" : "clean_text");
+        if (m === "article") {
+          return JSON.stringify(
+            {
+              ...article,
+              cleanText: article.cleanText.slice(0, 14000),
+            },
+            null,
+            2,
+          );
+        }
+        const metaLines = [
+          `URL: ${article.url || pageUrl}`,
+          `Title: ${article.title}`,
+          article.author ? `Author: ${article.author}` : "",
+          article.date ? `Date: ${article.date}` : "",
+          article.description ? `Description: ${article.description}` : "",
+          "",
+          article.cleanText.slice(0, 16000),
+        ].filter(Boolean);
+        return metaLines.join("\n");
+      }
+    }
     if (m === "snapshot" || m === "dom_tree" || m === "inputs") {
       const snap = await aiBrowserSnapRefs(page, { interactiveOnly: m !== "dom_tree", selector: selector || "" });
       aiBrowserEmitAction("extract", m);
@@ -1400,6 +1511,38 @@ async function aiExecuteBrowserExtract(selector, mode = "snapshot", emit) {
         : await page.content();
       aiBrowserEmitAction("extract", "html");
       return String(html).slice(0, 20000);
+    }
+    if (m === "js_endpoints") {
+      const pageUrl = page.url() || aiBrowserSession.url;
+      const html = await page.content();
+      const endpoints = __wideTs?.parseResponseLinks
+        ? __wideTs.parseResponseLinks(pageUrl, { "content-type": "text/html" }, html, true).filter((l) => l.source === "js")
+        : [];
+      for (const x of aiBrowserRuntime.xhrResponses || []) {
+        if ((x.mimeType.includes("javascript") || x.url.endsWith(".js")) && __wideTs?.extractJsEndpoints) {
+          endpoints.push(...__wideTs.extractJsEndpoints(x.url, x.body));
+        }
+      }
+      const unique = Array.from(new Map(endpoints.map((e) => [e.url, e])).values());
+      aiBrowserEmitAction("extract", "js_endpoints");
+      return JSON.stringify(unique.slice(0, 100), null, 2);
+    }
+    if (m === "secrets") {
+      const html = await page.content();
+      const combined = [html, ...(aiBrowserRuntime.xhrResponses || []).map((x) => x.body)].join("\n");
+      const secrets = __wideTs?.scanSecretsWithEntropy ? __wideTs.scanSecretsWithEntropy(combined) : [];
+      const jwts = __wideTs?.decodeJwtTokens ? __wideTs.decodeJwtTokens(combined) : [];
+      aiBrowserEmitAction("extract", "secrets");
+      return JSON.stringify({ secrets, jwtTokens: jwts }, null, 2);
+    }
+    if (m === "xhr") {
+      aiBrowserEmitAction("extract", "xhr");
+      return JSON.stringify((aiBrowserRuntime.xhrResponses || []).slice(-25), null, 2).slice(0, 16000);
+    }
+    if (m === "state_graph") {
+      const snap = aiBrowserRuntime.stateGraph ? aiBrowserRuntime.stateGraph.snapshot() : { nodes: [], edges: [], dot: "" };
+      aiBrowserEmitAction("extract", "state_graph");
+      return JSON.stringify(snap, null, 2).slice(0, 16000);
     }
     const text = await page.evaluate((sel) => {
       const root = sel ? document.querySelector(sel) : document.body;
@@ -1624,15 +1767,26 @@ function registerAiBrowserHandlers() {
     const action = String(payload.action || "").toLowerCase();
     try {
       if (action === "goto") {
-        const res = await aiExecuteBrowserNavigate(payload.url, emit);
+        const res = await aiExecuteBrowserNavigate(payload.url, emit, {
+          fastRead: typeof payload.fastRead === "boolean" ? payload.fastRead : undefined,
+        });
         return { ok: true, result: res, session: aiBrowserSession };
       }
       if (action === "open") {
         const res = await aiExecuteBrowserOpen({
           url: payload.url,
           stealth: typeof payload.stealth === "boolean" ? payload.stealth : undefined,
+          fastRead: typeof payload.fastRead === "boolean" ? payload.fastRead : undefined,
         }, emit);
         return { ok: true, result: res, session: aiBrowserSession };
+      }
+      if (action === "toggle_fast_read") {
+        aiBrowserRuntime.fastRead = !aiBrowserRuntime.fastRead;
+        aiBrowserSession.fastRead = aiBrowserRuntime.fastRead;
+        if (aiBrowserRuntime.page && !aiBrowserRuntime.page.isClosed()) {
+          await aiBrowserApplyFastRead(aiBrowserRuntime.page, aiBrowserRuntime.fastRead);
+        }
+        return { ok: true, session: aiBrowserSession };
       }
       if (action === "export_har") {
         const har = aiBrowserBuildHarLog(payload);

@@ -2,16 +2,22 @@ import { create } from "zustand";
 
 import {
   bridge,
+  type AiAntigravityModelFamily,
+  type AiClaudeEffort,
   type AiCloudProviderTelemetry,
+  type AiCodexModel,
   type AiConfig,
   type AiEvent,
   type AiHardware,
+  type AiInteractionMode,
   type AiMessage,
   type AiModelFile,
   type AiRunningLocalModel,
   type AiSearchResult,
   type AiSessionMeta,
   type AiSystemResources,
+  type AiToolMode,
+  type AiVerificationDiagnostic,
   type Ok,
 } from "@/lib/bridge";
 import { t } from "@/lib/i18n";
@@ -24,7 +30,7 @@ import { useAiBrowser } from "./aiBrowser";
 import { useEngine } from "./engine";
 import { useOast } from "./oast";
 import { usePitcherEnv } from "./pitcherEnv";
-import { applyAiEdit, useAiEdits } from "./aiEdits";
+import { applyAiEdit, syncWrittenAiEdit, useAiEdits } from "./aiEdits";
 import { useWorkspace } from "./workspace";
 import { useSettings } from "./settings";
 import { toast } from "./toast";
@@ -47,8 +53,17 @@ export interface AiToolStep {
   oldContent?: string;
   newContent?: string;
   existed?: boolean;
+  staged?: boolean;
   added?: number;
   removed?: number;
+  error?: boolean;
+  parentToolUseId?: string;
+  verification?: {
+    ok: boolean;
+    errors: number;
+    warnings: number;
+    diagnostics?: AiVerificationDiagnostic[];
+  };
 }
 
 export interface AiPermissionRequest {
@@ -68,7 +83,16 @@ export interface AiTurn {
   thinking: string;
   steps: AiToolStep[];
   error: string;
-  usage: { input: number; output: number; total: number } | null;
+  errorKind?: string;
+  usage: {
+    input: number;
+    output: number;
+    total: number;
+    cacheRead?: number;
+    cacheCreation?: number;
+    costUsd?: number;
+    durationMs?: number;
+  } | null;
   streaming: boolean;
   startedAt?: number;
   endedAt?: number;
@@ -83,6 +107,7 @@ export interface AiChat {
   activeTurn: string | null;
   stopping: boolean;
   error: string;
+  promptSuggestions?: string[];
 
   loaded: boolean;
 }
@@ -98,7 +123,7 @@ export interface AiImage {
 export const AI_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const AI_IMAGE_MAX_COUNT = 4;
 
-export const AI_IMAGE_PROVIDERS = new Set(["claude", "deepseek", "local"]);
+export const AI_IMAGE_PROVIDERS = new Set(["claude-code", "antigravity", "codex", "local"]);
 
 export interface AiPullState {
   reference: string;
@@ -123,7 +148,6 @@ export type AiEffort = "fast" | "thinking";
 
 interface AiState {
   config: AiConfig | null;
-  keys: Record<string, boolean>;
   hardware: AiHardware | null;
 
   sessions: AiSessionMeta[];
@@ -132,6 +156,22 @@ interface AiState {
 
   effort: AiEffort;
   setEffort(effort: AiEffort): void;
+  claudeEffort: AiClaudeEffort;
+  setClaudeEffort(effort: AiClaudeEffort): Promise<void>;
+  antigravityEffort: AiClaudeEffort;
+  setAntigravityEffort(effort: AiClaudeEffort): Promise<void>;
+  codexEffort: string;
+  setCodexEffort(effort: string): Promise<void>;
+  antigravityModels: AiAntigravityModelFamily[];
+  setAntigravityModels(models: AiAntigravityModelFamily[]): void;
+  codexModels: AiCodexModel[];
+  setCodexModels(models: AiCodexModel[]): void;
+  toolMode: AiToolMode;
+  interactionMode: AiInteractionMode;
+  allowBrowser: boolean;
+  setToolMode(mode: AiToolMode): Promise<void>;
+  setInteractionMode(mode: AiInteractionMode): Promise<void>;
+  setAllowBrowser(allow: boolean): Promise<void>;
 
   query: string;
   results: AiSearchResult[];
@@ -179,9 +219,8 @@ interface AiState {
   deleteSession(id: string): Promise<void>;
 
   setConfig(patch: Partial<AiConfig>): Promise<void>;
-  setKey(provider: string, key: string): Promise<boolean>;
 
-  ask(sessionId: string, text: string): Promise<void>;
+  ask(sessionId: string, text: string, activeFile?: string | null): Promise<void>;
   regenerate(sessionId: string): Promise<void>;
   stop(sessionId: string): Promise<void>;
   compactChat(sessionId: string): Promise<void>;
@@ -258,14 +297,81 @@ const STOP_RETRIES = 200;
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+const VALID_CLAUDE_EFFORTS = new Set<AiClaudeEffort>(["low", "medium", "high", "xhigh", "max"]);
+const VALID_CODEX_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
+
+const isAiEditStepName = (name?: string): boolean =>
+  name === "write_file" ||
+  name === "edit_file" ||
+  name === "write_to_file" ||
+  name === "replace_file_content" ||
+  name === "multi_replace_file_content" ||
+  name === "Write" ||
+  name === "Edit" ||
+  name === "MultiEdit" ||
+  name === "fileChange";
+
+const modesFromConfig = (cfg: AiConfig | null): {
+  toolMode: AiToolMode;
+  interactionMode: AiInteractionMode;
+  allowBrowser: boolean;
+  claudeEffort: AiClaudeEffort;
+  antigravityEffort: AiClaudeEffort;
+  codexEffort: string;
+} => {
+  const rawCodexEffort = String(cfg?.codexEffort ?? "").trim().toLowerCase();
+  return {
+    toolMode: cfg?.toolMode === "code" || cfg?.toolMode === "security" || cfg?.toolMode === "full" ? cfg.toolMode : "full",
+    interactionMode: cfg?.interactionMode === "ask" || cfg?.allowWrites === false ? "ask" : "agent",
+    allowBrowser: cfg?.allowBrowser !== false,
+    claudeEffort: cfg?.claudeEffort && VALID_CLAUDE_EFFORTS.has(cfg.claudeEffort) ? cfg.claudeEffort : "high",
+    antigravityEffort:
+      cfg?.antigravityEffort && VALID_CLAUDE_EFFORTS.has(cfg.antigravityEffort) ? cfg.antigravityEffort : "high",
+    codexEffort: rawCodexEffort && VALID_CODEX_EFFORTS.has(rawCodexEffort) ? rawCodexEffort : "high",
+  };
+};
+
 export const useAi = create<AiState>((set, get) => ({
   config: null,
-  keys: {},
   hardware: null,
   sessions: [],
   chats: {},
   effort: "fast" as AiEffort,
   setEffort: (effort) => set({ effort }),
+  claudeEffort: "high" as AiClaudeEffort,
+  setClaudeEffort: async (claudeEffort) => {
+    set({ claudeEffort });
+    await get().setConfig({ claudeEffort });
+  },
+  antigravityEffort: "high" as AiClaudeEffort,
+  setAntigravityEffort: async (antigravityEffort) => {
+    set({ antigravityEffort });
+    await get().setConfig({ antigravityEffort });
+  },
+  codexEffort: "high",
+  setCodexEffort: async (codexEffort) => {
+    set({ codexEffort });
+    await get().setConfig({ codexEffort });
+  },
+  antigravityModels: [],
+  setAntigravityModels: (antigravityModels) => set({ antigravityModels }),
+  codexModels: [],
+  setCodexModels: (codexModels) => set({ codexModels }),
+  toolMode: "full" as AiToolMode,
+  interactionMode: "agent" as AiInteractionMode,
+  allowBrowser: true,
+  setToolMode: async (mode) => {
+    set({ toolMode: mode });
+    await get().setConfig({ toolMode: mode });
+  },
+  setInteractionMode: async (mode) => {
+    set({ interactionMode: mode });
+    await get().setConfig({ interactionMode: mode, allowWrites: mode !== "ask" });
+  },
+  setAllowBrowser: async (allow) => {
+    set({ allowBrowser: allow });
+    await get().setConfig({ allowBrowser: allow });
+  },
   query: "",
   results: [],
   searching: false,
@@ -290,10 +396,11 @@ export const useAi = create<AiState>((set, get) => ({
   setPendingDraft: (session, text) => set({ pendingDraft: { session, text } }),
 
   load: async () => {
-    const [config, keys] = await Promise.all([bridge.aiConfig(), bridge.aiKeyStatus()]);
+    const config = await bridge.aiConfig();
+    const loadedConfig = config.ok ? (config.config ?? null) : null;
     set({
-      config: config.ok ? (config.config ?? null) : null,
-      keys: keys.ok ? (keys.configured ?? {}) : {},
+      config: loadedConfig,
+      ...(loadedConfig ? modesFromConfig(loadedConfig) : {}),
     });
     void get().refreshLocal();
     await get().listSessions();
@@ -407,6 +514,9 @@ export const useAi = create<AiState>((set, get) => ({
       set((state) => ({ attachments: dropAttachments(state.attachments, id), images: dropImages(state.images, id) }));
       return;
     }
+    void bridge.aiCloseClaudeSession(id);
+    void bridge.aiCloseAntigravitySession(id);
+    void bridge.aiCloseCodexSession(id);
     set((state) => {
       const chats = { ...state.chats };
       delete chats[id];
@@ -432,21 +542,10 @@ export const useAi = create<AiState>((set, get) => ({
 
   setConfig: async (patch) => {
     const reply = await bridge.aiConfig(patch);
-    if (reply.ok) set({ config: reply.config ?? null });
-  },
-
-  setKey: async (provider, key) => {
-    set({ busy: true, error: "" });
-
-    const verified = await bridge.aiVerifyKey(provider, key);
-    if (!verified.ok) {
-      set({ busy: false, error: verified.error ?? "That key was refused." });
-      return false;
+    if (reply.ok) {
+      const nextConfig = reply.config ?? null;
+      set({ config: nextConfig, ...(nextConfig ? modesFromConfig(nextConfig) : {}) });
     }
-    await bridge.aiSetKey(provider, key);
-    const status = await bridge.aiKeyStatus();
-    set({ busy: false, keys: status.ok ? (status.configured ?? {}) : {} });
-    return true;
   },
 
   attach: (sessionId, path) =>
@@ -484,7 +583,7 @@ export const useAi = create<AiState>((set, get) => ({
       },
     })),
 
-  ask: async (sessionId, text) => {
+  ask: async (sessionId, text, activeFile) => {
     const message = text.trim();
     const chat = get().chats[sessionId];
     if (!message || !chat || chat.activeTurn) return;
@@ -566,6 +665,7 @@ export const useAi = create<AiState>((set, get) => ({
         activeTurn: id,
         stopping: false,
         error: unreadable,
+        promptSuggestions: [],
         turns: [
           ...current.turns,
           { id: `${id}-user`, role: "user", text: message, thinking: "", steps: [], error: "", usage: null, streaming: false, startedAt: turnStartedAt },
@@ -574,16 +674,36 @@ export const useAi = create<AiState>((set, get) => ({
       })),
     }));
 
+    const editorState = useEditor.getState();
+    const resolvedActiveFile = activeFile !== undefined ? (activeFile ?? null) : (editorState.lastFilePath ?? null);
+    const openTabs = (editorState.tabs || []).map((t) => ({
+      name: t.name,
+      path: t.path,
+      kind: t.kind,
+      active: t.path === editorState.activePath,
+    }));
+
     const reply = await bridge
       .aiSend({
         id,
+        sessionId,
         root: projectRoot,
         provider,
         model,
+        fallbackModel: config.claudeFallbackModel,
         messages: providerMessages,
         system: "",
         effort: get().effort,
+        claudeEffort: get().claudeEffort,
+        antigravityEffort: get().antigravityEffort,
+        codexEffort: get().codexEffort,
         language: useSettings.getState().language,
+        activeFile: resolvedActiveFile,
+        openTabs,
+        toolMode: get().toolMode,
+        interactionMode: get().interactionMode,
+        allowBrowser: get().allowBrowser,
+        reviewEnabled: useAiEdits.getState().reviewEnabled,
       })
       .catch(
         (failure: unknown): Ok<{ answered?: boolean }> => ({
@@ -717,6 +837,7 @@ export const useAi = create<AiState>((set, get) => ({
     if (provider && model && typeof bridge.aiCompact === "function") {
       try {
         const reply = await bridge.aiCompact({
+          sessionId,
           provider,
           model,
           messages: older.map((m) => ({ role: m.role, content: m.content ?? "" })),
@@ -769,8 +890,30 @@ export const useAi = create<AiState>((set, get) => ({
     for (const turn of discardedTurns) {
       for (const step of turn.steps) {
         let path = step.filePath;
-        if (!path && typeof step.input === "object" && step.input && "path" in step.input) {
-          const rawPath = String((step.input as { path?: unknown }).path || "").trim();
+        if (!path && typeof step.input === "object" && step.input) {
+          const inp = step.input as {
+            path?: unknown;
+            Path?: unknown;
+            file_path?: unknown;
+            filePath?: unknown;
+            TargetFile?: unknown;
+            target_file?: unknown;
+            AbsolutePath?: unknown;
+            absolute_path?: unknown;
+            changes?: Array<{ path?: unknown }>;
+          };
+          const rawPath = String(
+            inp.path ||
+              inp.Path ||
+              inp.file_path ||
+              inp.filePath ||
+              inp.TargetFile ||
+              inp.target_file ||
+              inp.AbsolutePath ||
+              inp.absolute_path ||
+              (Array.isArray(inp.changes) ? inp.changes[0]?.path : "") ||
+              "",
+          ).trim();
           if (rawPath) {
             path = rawPath.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(rawPath)
               ? rawPath
@@ -782,8 +925,7 @@ export const useAi = create<AiState>((set, get) => ({
         if (!path) continue;
 
         const isModifyingStep =
-          step.name === "write_file" ||
-          step.name === "edit_file" ||
+          isAiEditStepName(step.name) ||
           step.name === "delete_file" ||
           step.oldContent !== undefined ||
           step.newContent !== undefined;
@@ -822,6 +964,9 @@ export const useAi = create<AiState>((set, get) => ({
     if (fileRollbackMap.size > 0) {
       void useWorkspace.getState().refresh();
     }
+    void bridge.aiCloseClaudeSession(sessionId);
+    void bridge.aiCloseAntigravitySession(sessionId);
+    void bridge.aiCloseCodexSession(sessionId);
 
     const keptTurns = chat.turns.slice(0, targetIndex);
     const keptHistory = keptTurns
@@ -1147,8 +1292,16 @@ export function subscribeAiEvents(): () => void {
       return;
     }
     if (event.type === "edit") {
-      if (useAiEdits.getState().reviewEnabled) {
-        void useAiEdits.getState().queue({ path: event.path, root: event.root ?? "", content: event.content });
+      if (event.staged === true || useAiEdits.getState().reviewEnabled) {
+        void useAiEdits.getState().queue({
+          path: event.path,
+          root: event.root ?? "",
+          content: event.content,
+          oldContent: event.oldContent,
+          existed: event.existed,
+        });
+      } else if (event.staged === false) {
+        syncWrittenAiEdit(event.path, event.root ?? "", event.content);
       } else {
         applyAiEdit(event.path, event.root ?? "", event.content, event.existed === true);
       }
@@ -1169,6 +1322,15 @@ export function subscribeAiEvents(): () => void {
     }
 
     flushDeltas();
+    if (event.type === "prompt_suggestion") {
+      useAi.setState((state) => ({
+        chats: patchChat(state.chats, sessionId, (chat) => ({
+          ...chat,
+          promptSuggestions: event.suggestions,
+        })),
+      }));
+      return;
+    }
     const settles = event.type === "done" || event.type === "error";
     const now = Date.now();
     useAi.setState((state) => ({
@@ -1187,7 +1349,15 @@ export function subscribeAiEvents(): () => void {
                 ...turn,
                 steps: [
                   ...turn.steps,
-                  { kind: "tool", name: event.name, input: event.input, result: "", done: false, startedAt: now },
+                  {
+                    kind: "tool",
+                    name: event.name,
+                    input: event.input,
+                    result: "",
+                    done: false,
+                    startedAt: now,
+                    parentToolUseId: event.parentToolUseId,
+                  },
                 ],
               };
             case "edit": {
@@ -1195,13 +1365,14 @@ export function subscribeAiEvents(): () => void {
               const editAdded = typeof event.added === "number" ? event.added : undefined;
               const editRemoved = typeof event.removed === "number" ? event.removed : undefined;
               for (let index = steps.length - 1; index >= 0; index -= 1) {
-                if ((steps[index].name === "write_file" || steps[index].name === "edit_file") && !steps[index].done) {
+                if (isAiEditStepName(steps[index].name) && (!steps[index].done || !steps[index].filePath)) {
                   steps[index] = {
                     ...steps[index],
                     filePath: event.path,
                     oldContent: event.oldContent ?? "",
                     newContent: event.content,
                     existed: Boolean(event.existed),
+                    staged: Boolean(event.staged),
                     added: editAdded ?? steps[index].added,
                     removed: editRemoved ?? steps[index].removed,
                   };
@@ -1216,8 +1387,42 @@ export function subscribeAiEvents(): () => void {
                   oldContent: event.oldContent ?? "",
                   newContent: event.content,
                   existed: Boolean(event.existed),
+                  staged: Boolean(event.staged),
                   added: editAdded ?? steps[lastIdx].added,
                   removed: editRemoved ?? steps[lastIdx].removed,
+                };
+              }
+              return { ...turn, steps };
+            }
+            case "verification": {
+              const steps = [...turn.steps];
+              const matchOpen = (index: number) =>
+                isAiEditStepName(steps[index].name) &&
+                (steps[index].filePath === event.path || !steps[index].filePath);
+              let targetIdx = -1;
+              for (let index = steps.length - 1; index >= 0; index -= 1) {
+                if (matchOpen(index) && !steps[index].done) {
+                  targetIdx = index;
+                  break;
+                }
+              }
+              if (targetIdx === -1) {
+                for (let index = steps.length - 1; index >= 0; index -= 1) {
+                  if (steps[index].filePath === event.path) {
+                    targetIdx = index;
+                    break;
+                  }
+                }
+              }
+              if (targetIdx !== -1) {
+                steps[targetIdx] = {
+                  ...steps[targetIdx],
+                  verification: {
+                    ok: event.ok,
+                    errors: event.errors,
+                    warnings: event.warnings,
+                    diagnostics: event.diagnostics,
+                  },
                 };
               }
               return { ...turn, steps };
@@ -1225,7 +1430,12 @@ export function subscribeAiEvents(): () => void {
             case "file_read": {
               const steps = [...turn.steps];
               for (let index = steps.length - 1; index >= 0; index -= 1) {
-                if (steps[index].name === "read_file" && !steps[index].done) {
+                if (
+                  (steps[index].name === "read_file" ||
+                    steps[index].name === "view_file" ||
+                    steps[index].name === "Read") &&
+                  !steps[index].done
+                ) {
                   steps[index] = {
                     ...steps[index],
                     filePath: event.path,
@@ -1240,7 +1450,13 @@ export function subscribeAiEvents(): () => void {
               const steps = [...turn.steps];
               for (let index = steps.length - 1; index >= 0; index -= 1) {
                 if (steps[index].name === event.name && !steps[index].done) {
-                  steps[index] = { ...steps[index], result: event.result, done: true, endedAt: now };
+                  steps[index] = {
+                    ...steps[index],
+                    result: event.result,
+                    error: Boolean(event.error),
+                    done: true,
+                    endedAt: now,
+                  };
                   break;
                 }
               }
@@ -1253,10 +1469,26 @@ export function subscribeAiEvents(): () => void {
                   input: (turn.usage?.input ?? 0) + event.input,
                   output: (turn.usage?.output ?? 0) + event.output,
                   total: (turn.usage?.total ?? 0) + event.total,
+                  cacheRead: (turn.usage?.cacheRead ?? 0) + (event.cacheRead ?? 0),
+                  cacheCreation: (turn.usage?.cacheCreation ?? 0) + (event.cacheCreation ?? 0),
+                  costUsd:
+                    typeof event.costUsd === "number"
+                      ? (turn.usage?.costUsd ?? 0) + event.costUsd
+                      : turn.usage?.costUsd,
+                  durationMs:
+                    typeof event.durationMs === "number"
+                      ? (turn.usage?.durationMs ?? 0) + event.durationMs
+                      : turn.usage?.durationMs,
                 },
               };
             case "error":
-              return { ...turn, error: event.message, streaming: false, endedAt: turn.endedAt ?? now };
+              return {
+                ...turn,
+                error: event.message,
+                errorKind: event.errorKind,
+                streaming: false,
+                endedAt: turn.endedAt ?? now,
+              };
             case "done":
               return { ...turn, streaming: false, endedAt: turn.endedAt ?? now };
             default:

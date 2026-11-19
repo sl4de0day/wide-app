@@ -118,8 +118,8 @@ function dbRecordHistoryEntry(entry) {
       };
       const existing = await dbReadHistory();
       await dbWriteHistory([item, ...existing.slice(0, 49)]);
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("db", "record query history failed", error);
     }
   });
   return dbHistoryChain;
@@ -187,8 +187,8 @@ async function dbBackupCorruptVault(vaultPath) {
   try {
     const backup = `${vaultPath}.corrupt-${Date.now()}`;
     await promises.copyFile(vaultPath, backup);
-  } catch {
-    void 0;
+  } catch (error) {
+    reportRecoverableError("db", "backup corrupt vault failed", error);
   }
 }
 
@@ -989,8 +989,8 @@ async function dbIntrospectSchema(session) {
         try {
           const cntRes = await session.query(`SELECT COUNT(*) AS c FROM ${quoted}`);
           rowCount = Number(cntRes.rows?.[0]?.c || 0);
-        } catch {
-          void 0;
+        } catch (error) {
+          reportRecoverableError("db", `table count query failed (${item.name})`, error);
         }
         const columns = colRes.rows.map((c) => ({
           name: String(c.name),
@@ -1033,8 +1033,8 @@ async function dbIntrospectSchema(session) {
             defaultValue: null,
             primaryKey: false,
           }));
-        } catch {
-          void 0;
+        } catch (error) {
+          reportRecoverableError("db", `view introspection failed (${item.name})`, error);
         }
         views.push({ schema: "main", name: String(item.name), type: "view", columns, ddl: String(item.sql || "") });
       } else if (item.type === "index") {
@@ -1983,8 +1983,8 @@ function registerDatabaseHandlers() {
       } catch (err) {
         try {
           await session.query("ROLLBACK", []);
-        } catch {
-          void 0;
+        } catch (rollbackErr) {
+          reportRecoverableError("db", "ROLLBACK failed after query error", rollbackErr);
         }
         throw err;
       }

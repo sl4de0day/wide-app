@@ -1,355 +1,22 @@
-function aiNormalizeToolCall(rawName, rawInput) {
-  const cleanRaw = String(rawName ?? "").trim().toLowerCase();
-  let name = AI_TOOL_NAME_ALIASES[cleanRaw] || String(rawName ?? "").trim();
-  const src = rawInput && typeof rawInput === "object" && !Array.isArray(rawInput) ? rawInput : {};
-  const input = { ...src };
-
-  if (input.path === undefined) {
-    const aliasPath =
-      src.file_path ?? src.filepath ?? src.filename ?? src.file ?? src.target_file ?? src.directory ?? src.dir;
-    if (aliasPath !== undefined) input.path = String(aliasPath);
-  }
-  if (input.content === undefined) {
-    const aliasContent =
-      src.code ?? src.text ?? src.body ?? src.new_content ?? src.file_text ?? src.contents;
-    if (aliasContent !== undefined) input.content = String(aliasContent);
-  }
-  if (input.find === undefined) {
-    const aliasFind =
-      src.old_str ?? src.old_text ?? src.old_string ?? src.search ?? src.original ?? src.target;
-    if (aliasFind !== undefined) input.find = String(aliasFind);
-  }
-  if (input.replace === undefined) {
-    const aliasReplace =
-      src.new_str ?? src.new_text ?? src.new_string ?? src.replacement;
-    if (aliasReplace !== undefined) input.replace = String(aliasReplace);
-  }
-  if (input.command === undefined) {
-    const aliasCommand =
-      src.cmd ?? src.script ?? src.shell_command ?? src.command_line;
-    if (aliasCommand !== undefined) input.command = String(aliasCommand);
-  }
-  if (input.query === undefined) {
-    const aliasQuery =
-      src.pattern ?? src.search_query ?? src.term ?? src.keyword;
-    if (aliasQuery !== undefined) input.query = String(aliasQuery);
-  }
-
-  if (name === "transform_data") {
-    if (input.operation === undefined) {
-      const aliasOp = src.op ?? src.type ?? src.action ?? src.method ?? src.mode;
-      if (aliasOp !== undefined) input.operation = String(aliasOp);
-    }
-    if (input.input === undefined) {
-      const aliasInput = src.data ?? src.text ?? src.value ?? src.content ?? src.payload;
-      if (aliasInput !== undefined) input.input = String(aliasInput);
-    }
-  }
-
-  if (name === "open_tool_tab") {
-    if (input.tab === undefined) {
-      const aliasTab = src.tool ?? src.target ?? src.name ?? src.panel ?? src.view;
-      if (aliasTab !== undefined) input.tab = String(aliasTab);
-    }
-    if (input.subtool === undefined) {
-      const aliasSub = src.sub ?? src.sub_tool ?? src.view;
-      if (aliasSub !== undefined && aliasSub !== input.tab) input.subtool = String(aliasSub);
-    }
-  }
-
-  if (name === "get_diagnostics") {
-    if (input.path === undefined) {
-      const aliasPath = src.file ?? src.filepath ?? src.file_path;
-      if (aliasPath !== undefined) input.path = String(aliasPath);
-    }
-  }
-
-  if (name === "send_http_request") {
-    if (input.url === undefined) {
-      const aliasUrl = src.target ?? src.uri ?? src.address ?? src.endpoint ?? src.link;
-      if (aliasUrl !== undefined) input.url = String(aliasUrl);
-    }
-    if (input.method === undefined) {
-      const aliasMethod = src.verb ?? src.http_method;
-      if (aliasMethod !== undefined) input.method = String(aliasMethod);
-    }
-    if (input.headers === undefined) {
-      const aliasHeaders = src.header ?? src.req_headers ?? src.request_headers;
-      if (aliasHeaders !== undefined) input.headers = aliasHeaders;
-    }
-    if (input.body === undefined) {
-      const aliasBody = src.data ?? src.payload ?? src.post_data ?? src.content;
-      if (aliasBody !== undefined) input.body = aliasBody;
-    }
-    if (input.insecure === undefined) {
-      const aliasInsecure = src.allow_insecure ?? src.ignore_ssl ?? src.reject_unauthorized;
-      if (aliasInsecure !== undefined) input.insecure = Boolean(aliasInsecure);
-    }
-  }
-
-  if (name === "run_security_scan") {
-    if (input.path === undefined) {
-      const aliasPath = src.file ?? src.filepath ?? src.target ?? src.file_path;
-      if (aliasPath !== undefined) input.path = String(aliasPath);
-    }
-    if (input.minSeverity === undefined) {
-      const aliasSev = src.severity ?? src.level ?? src.min_severity;
-      if (aliasSev !== undefined) input.minSeverity = String(aliasSev);
-    }
-  }
-
-  if (name === "check_dependencies") {
-    if (input.manifest === undefined) {
-      const aliasManifest = src.file ?? src.path ?? src.target ?? src.file_path;
-      if (aliasManifest !== undefined) input.manifest = String(aliasManifest);
-    }
-  }
-
-  if (name === "get_open_tabs") {
-    return { name: "get_open_tabs", input: {} };
-  }
-
-  if (name === "manage_catcher" || name === "catcher_control") {
-    if (input.action === undefined) {
-      const aliasAction = src.command ?? src.operation ?? src.op ?? src.method ?? src.type;
-      if (aliasAction !== undefined) input.action = String(aliasAction);
-      else if (cleanRaw === "start_proxy") input.action = "start";
-      else if (cleanRaw === "stop_proxy") input.action = "stop";
-      else if (cleanRaw === "proxy_status" || cleanRaw === "catcher_status") input.action = "status";
-      else if (cleanRaw.includes("traffic")) input.action = "get_traffic";
-      else input.action = "status";
-    }
-    if (input.intercept === undefined && src.enabled !== undefined) {
-      input.intercept = Boolean(src.enabled);
-    }
-  }
-
-  if (name === "browser_navigate" || name === "browser_open") {
-    if (input.url === undefined) {
-      const aliasUrl = src.target ?? src.uri ?? src.address ?? src.link ?? src.endpoint;
-      if (aliasUrl !== undefined) input.url = String(aliasUrl);
-    }
-  }
-
-  if (name === "browser_click" || name === "browser_hover") {
-    if (input.ref === undefined && typeof src.target === "string" && /^@?e\d+$/i.test(src.target.trim())) {
-      input.ref = src.target.trim().startsWith("@") ? src.target.trim() : `@${src.target.trim()}`;
-    } else if (input.selector === undefined && src.target !== undefined) {
-      input.selector = String(src.target);
-    }
-    if (input.element_id === undefined && src.index !== undefined) input.element_id = Number(src.index);
-  }
-
-  if (name === "browser_type") {
-    if (input.text === undefined) {
-      const aliasText = src.value ?? src.content ?? src.input ?? src.query;
-      if (aliasText !== undefined) input.text = String(aliasText);
-    }
-    if (input.ref === undefined && typeof src.target === "string" && /^@?e\d+$/i.test(src.target.trim())) {
-      input.ref = src.target.trim().startsWith("@") ? src.target.trim() : `@${src.target.trim()}`;
-    } else if (input.selector === undefined && src.target !== undefined) {
-      input.selector = String(src.target);
-    }
-    if (input.element_id === undefined && src.index !== undefined) input.element_id = Number(src.index);
-  }
-
-  if (name === "edit_file" && input.find === undefined && typeof input.content === "string") {
-    name = "write_file";
-  } else if (
-    name === "write_file" &&
-    input.content === undefined &&
-    typeof input.find === "string" &&
-    typeof input.replace === "string"
-  ) {
-    name = "edit_file";
-  }
-
-  return { name, input };
-}
-
 function aiEscapeControlCharsInJsonStrings(raw) {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < raw.length; i += 1) {
-    const ch = raw[i];
-    if (inString) {
-      if (escaped) {
-        out += ch;
-        escaped = false;
-      } else if (ch === "\\") {
-        out += ch;
-        escaped = true;
-      } else if (ch === '"') {
-        out += ch;
-        inString = false;
-      } else if (ch === "\n") {
-        out += "\\n";
-      } else if (ch === "\r") {
-        out += "\\r";
-      } else if (ch === "\t") {
-        out += "\\t";
-      } else {
-        out += ch;
-      }
-    } else {
-      if (ch === '"') inString = true;
-      out += ch;
-    }
-  }
-  return out;
+  return __wideTs.aiEscapeControlCharsInJsonStrings(raw);
 }
 
 function aiParseLenientJson(raw) {
-  if (!raw || typeof raw !== "string") return null;
-  const trimmed = raw.trim().replace(/^```(?:json|tool_call)?\s*/i, "").replace(/\s*```$/, "").trim();
-  if (!trimmed) return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    void 0;
-  }
-  try {
-    return JSON.parse(aiEscapeControlCharsInJsonStrings(trimmed));
-  } catch {
-    void 0;
-  }
-  const firstBrace = trimmed.indexOf("{");
-  const lastBrace = trimmed.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    const sub = trimmed.slice(firstBrace, lastBrace + 1);
-    try {
-      return JSON.parse(sub);
-    } catch {
-      try {
-        return JSON.parse(aiEscapeControlCharsInJsonStrings(sub));
-      } catch {
-        return null;
-      }
-    }
-  }
-  return null;
+  return __wideTs.aiParseLenientJson(raw);
 }
 
 function aiParseXmlFunctionBlock(funcName, inner) {
-  const params = {};
-  const paramRegex = /<parameter=([a-zA-Z0-9_.-]+)>([\s\S]*?)(?:<\/parameter>|(?=<parameter=)|$)/gi;
-  let match;
-  let foundParam = false;
-  while ((match = paramRegex.exec(inner)) !== null) {
-    foundParam = true;
-    const key = match[1].trim();
-    let val = match[2];
-    if (val.startsWith("\n")) val = val.slice(1);
-    if (val.endsWith("\n")) val = val.slice(0, -1);
-    params[key] = val;
-  }
-  if (foundParam) {
-    return aiNormalizeToolCall(funcName, params);
-  }
-  const parsedJson = aiParseLenientJson(inner);
-  if (parsedJson && typeof parsedJson === "object") {
-    const args = parsedJson.arguments ?? parsedJson.input ?? parsedJson.parameters ?? parsedJson;
-    return aiNormalizeToolCall(funcName, typeof args === "string" ? (aiParseLenientJson(args) ?? {}) : args);
-  }
-  return null;
+  return __wideTs.aiParseXmlFunctionBlock(funcName, inner);
 }
 
 function aiConvertParsedObjectToCall(obj) {
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
-  const rawName = obj.name ?? obj.tool ?? obj.function?.name ?? obj.function;
-  if (typeof rawName !== "string" || !rawName.trim()) return null;
-  let rawArgs = obj.arguments ?? obj.input ?? obj.parameters ?? obj.args ?? obj.function?.arguments;
-  if (typeof rawArgs === "string") {
-    rawArgs = aiParseLenientJson(rawArgs) ?? {};
-  }
-  if (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs)) {
-    const rest = { ...obj };
-    delete rest.name;
-    delete rest.tool;
-    delete rest.function;
-    delete rest.type;
-    rawArgs = rest;
-  }
-  return aiNormalizeToolCall(rawName, rawArgs);
+  return __wideTs.aiConvertParsedObjectToCall(obj);
 }
 
 function aiExtractTextToolCalls(text) {
-  const raw = String(text ?? "");
-  if (!raw.trim()) return [];
-  const results = [];
-
-  const toolCallRegex = /<tool_call\b[^>]*>([\s\S]*?)(?:<\/tool_call>|$)/gi;
-  let match;
-  while ((match = toolCallRegex.exec(raw)) !== null) {
-    const body = match[1].trim();
-    if (!body) continue;
-    const fnMatch = /<function=([a-zA-Z0-9_.-]+)>([\s\S]*?)(?:<\/function>|$)/i.exec(body);
-    if (fnMatch) {
-      const call = aiParseXmlFunctionBlock(fnMatch[1], fnMatch[2]);
-      if (call && call.name) results.push(call);
-      continue;
-    }
-    const parsed = aiParseLenientJson(body);
-    if (Array.isArray(parsed)) {
-      for (const item of parsed) {
-        const call = aiConvertParsedObjectToCall(item);
-        if (call && call.name) results.push(call);
-      }
-    } else if (parsed) {
-      const call = aiConvertParsedObjectToCall(parsed);
-      if (call && call.name) results.push(call);
-    }
-  }
-
-  if (results.length > 0) return results;
-
-  const standaloneFnRegex = /<function=([a-zA-Z0-9_.-]+)>([\s\S]*?)<\/function>/gi;
-  while ((match = standaloneFnRegex.exec(raw)) !== null) {
-    const call = aiParseXmlFunctionBlock(match[1], match[2]);
-    if (call && call.name) results.push(call);
-  }
-  if (results.length > 0) return results;
-
-  const directTagRegex = /<(write_file|edit_file|read_file|list_dir|run_command|search|create_dir|delete_file)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
-  while ((match = directTagRegex.exec(raw)) !== null) {
-    const tagName = match[1].toLowerCase();
-    const attrs = match[2] || "";
-    let inner = match[3] || "";
-    if (inner.startsWith("\n")) inner = inner.slice(1);
-    if (inner.endsWith("\n")) inner = inner.slice(0, -1);
-    const pathAttr = /\b(?:path|file|filename)=["']([^"']+)["']/i.exec(attrs);
-    if (tagName === "write_file") {
-      if (pathAttr) {
-        results.push(aiNormalizeToolCall("write_file", { path: pathAttr[1], content: inner }));
-      } else {
-        const parsed = aiParseLenientJson(inner);
-        const call = aiConvertParsedObjectToCall({ name: "write_file", ...(parsed || {}) });
-        if (call) results.push(call);
-      }
-    } else if (tagName === "run_command") {
-      results.push(aiNormalizeToolCall("run_command", { command: inner.trim() }));
-    } else if (tagName === "read_file" || tagName === "list_dir" || tagName === "create_dir" || tagName === "delete_file") {
-      results.push(aiNormalizeToolCall(tagName, { path: pathAttr ? pathAttr[1] : inner.trim() }));
-    } else if (tagName === "search") {
-      results.push(aiNormalizeToolCall("search", { query: inner.trim() }));
-    }
-  }
-  if (results.length > 0) return results;
-
-  const fenceRegex = /```(?:tool_call|json)?\s*\n([\s\S]*?)```/gi;
-  while ((match = fenceRegex.exec(raw)) !== null) {
-    const body = match[1].trim();
-    if (!body.startsWith("{")) continue;
-    const parsed = aiParseLenientJson(body);
-    if (!parsed) continue;
-    const call = aiConvertParsedObjectToCall(parsed);
-    if (call && AI_KNOWN_TOOL_NAMES.has(call.name.toLowerCase())) {
-      results.push(call);
-    }
-  }
-
-  return results;
+  const known = new Set(AI_TOOLS.map((t) => t.name.toLowerCase()));
+  return __wideTs.aiExtractTextToolCalls(text, known);
 }
 
 function aiCreateStreamFilter(send) {
@@ -463,34 +130,9 @@ function aiCreateStreamFilter(send) {
   };
 }
 
-function aiHasSubstantialCodeBlock(text) {
-  const cleaned = String(text ?? "")
-    .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, "")
-    .replace(/<thinking>[\s\S]*?(?:<\/thinking>|$)/gi, "");
-  const match = /```[a-zA-Z0-9_+-]*\s*\n([\s\S]*?)```/.exec(cleaned);
-  if (!match) return false;
-  const lines = match[1].trim().split("\n");
-  return lines.length >= 2;
-}
-
-function aiToolsFor(provider, allowWrites) {
-  const own = allowWrites ? AI_TOOLS : AI_TOOLS.filter((tool) => !AI_WRITE_TOOLS.has(tool.name));
+function aiToolsFor(_provider, optsOrAllowWrites) {
+  const own = aiFilterTools(optsOrAllowWrites);
   const tools = [...own, ...mcpToolSpecs()];
-  if (provider === "claude") {
-    return tools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      input_schema: tool.parameters,
-    }));
-  }
-  if (provider === "gemini") {
-    return tools.map((tool) => ({
-      type: "function",
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    }));
-  }
   return tools.map((tool) => ({
     type: "function",
     function: { name: tool.name, description: tool.description, parameters: tool.parameters },
@@ -514,20 +156,6 @@ function aiTrim(text) {
     text.slice(0, AI_MAX_TOOL_RESULT_BYTES) +
     `\n\n… truncated at ${AI_MAX_TOOL_RESULT_BYTES} characters. Narrow the request if you need the rest.`
   );
-}
-
-const AI_ARGS_MAY_BE_EMPTY = new Set(["content", "replace"]);
-
-function aiMissingArgs(name, input) {
-  const spec = AI_TOOLS.find((tool) => tool.name === name);
-  if (!spec) return [];
-  const properties = spec.parameters.properties ?? {};
-  return (spec.parameters.required ?? []).filter((key) => {
-    const value = input?.[key];
-    if (properties[key]?.type !== "string") return value === undefined || value === null;
-    if (typeof value !== "string") return true;
-    return value.trim() === "" && !AI_ARGS_MAY_BE_EMPTY.has(key);
-  });
 }
 
 function aiAllowed(channel, args) {
@@ -735,12 +363,7 @@ function aiDiffCounts(oldText, newText) {
 }
 
 function aiOffsetToPosition(content, offset) {
-  const clamped = Math.max(0, Math.min(offset, content.length));
-  const slice = content.slice(0, clamped);
-  const lines = slice.split("\n");
-  const line = lines.length;
-  const col = lines[lines.length - 1].length + 1;
-  return { line, col };
+  return __wideTs.aiOffsetToPosition(content, offset);
 }
 
 function aiExecuteDataTransform(op, text) {
@@ -917,7 +540,146 @@ function aiNormalizeToolTabName(target, sub) {
   return { tool: t, subtool: sub };
 }
 
-async function aiGetDiagnostics(root, filePath) {
+async function aiRunFileDiagnostics(root, resolvedPath, content, { syncContent = false, restoreAfter = false, timeoutMs = 4500 } = {}) {
+  const items = [];
+  const isTsJs = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(resolvedPath);
+
+  if (isTsJs) {
+    const work = async () => {
+      if (syncContent && typeof tsCall === "function") {
+        await tsCall("sync", [root, resolvedPath, content], { ok: false });
+      }
+      const tasks = [];
+      if (typeof tsCall === "function") {
+        tasks.push(
+          tsCall("diagnostics", [root, resolvedPath], { diagnostics: [] })
+            .then((tsResult) => {
+              const list = Array.isArray(tsResult?.diagnostics) ? tsResult.diagnostics : [];
+              for (const item of list) {
+                const pos = aiOffsetToPosition(content, item.from ?? 0);
+                items.push({
+                  source: "TypeScript",
+                  line: pos.line,
+                  col: pos.col,
+                  severity: item.severity || "error",
+                  code: item.code ? `TS${item.code}` : "",
+                  message: String(item.message || ""),
+                });
+              }
+            })
+            .catch((err) => {
+              console.warn("[ai-verify] TypeScript diagnostics failed:", String(err?.message || err));
+            })
+        );
+      }
+      if (typeof runLinter === "function") {
+        tasks.push(
+          runLinter({ root, filePath: resolvedPath, text: content })
+            .then((lintResult) => {
+              if (lintResult && lintResult.ok && Array.isArray(lintResult.diagnostics)) {
+                for (const item of lintResult.diagnostics) {
+                  const pos = aiOffsetToPosition(content, item.from ?? 0);
+                  items.push({
+                    source: "ESLint",
+                    line: pos.line,
+                    col: pos.col,
+                    severity: item.severity || "warning",
+                    code: "",
+                    message: String(item.message || ""),
+                  });
+                }
+              }
+            })
+            .catch((err) => {
+              console.warn("[ai-verify] ESLint check failed:", String(err?.message || err));
+            })
+        );
+      }
+      await Promise.all(tasks);
+      if (restoreAfter && typeof tsCall === "function") {
+        try {
+          const diskText = await promises.readFile(resolvedPath, "utf8");
+          await tsCall("sync", [root, resolvedPath, diskText], { ok: false });
+        } catch {
+          await tsCall("close", [resolvedPath], { ok: false });
+        }
+      }
+    };
+
+    await Promise.race([
+      work(),
+      new Promise((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } else if (typeof lspGetCachedDiagnostics === "function") {
+    const lspItems = lspGetCachedDiagnostics(resolvedPath);
+    for (const item of lspItems) {
+      const pos = aiOffsetToPosition(content, item.from ?? 0);
+      items.push({
+        source: "LSP",
+        line: pos.line,
+        col: pos.col,
+        severity: item.severity || "warning",
+        code: "",
+        message: String(item.message || ""),
+      });
+    }
+  }
+
+  items.sort((a, b) => a.line - b.line || a.col - b.col);
+  return items;
+}
+
+async function aiVerifyEditedFile(root, resolvedPath, relPath, candidateContent, staged, send) {
+  try {
+    const items = await aiRunFileDiagnostics(root, resolvedPath, candidateContent, {
+      syncContent: true,
+      restoreAfter: Boolean(staged),
+      timeoutMs: 4500,
+    });
+    const errors = items.filter((it) => String(it.severity).toLowerCase() === "error");
+    const warnings = items.filter((it) => String(it.severity).toLowerCase() === "warning");
+
+    if (typeof send === "function") {
+      send({
+        type: "verification",
+        path: resolvedPath,
+        relativePath: relPath,
+        ok: errors.length === 0,
+        errors: errors.length,
+        warnings: warnings.length,
+        diagnostics: items.slice(0, 12),
+      });
+    }
+
+    if (errors.length === 0 && warnings.length === 0) {
+      return /\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(resolvedPath)
+        ? "\nAuto-verification: TypeScript and ESLint passed with 0 errors."
+        : "";
+    }
+
+    if (errors.length === 0) {
+      const warnPreview = warnings
+        .slice(0, 5)
+        .map((w) => `- [Line ${w.line}, Col ${w.col}] [${w.source}]: ${w.message}`)
+        .join("\n");
+      return `\nAuto-verification: 0 error(s), ${warnings.length} warning(s) in ${relPath}:\n${warnPreview}`;
+    }
+
+    const errPreview = errors
+      .slice(0, 10)
+      .map((e) => `- [Line ${e.line}, Col ${e.col}] [ERROR${e.code ? ` ${e.code}` : ""} - ${e.source}]: ${e.message}`)
+      .join("\n");
+    return `\n[AUTO-VERIFICATION FAILED: ${errors.length} error(s) detected in ${relPath}]\n${errPreview}\nFix these diagnostics before finishing your response.`;
+  } catch (err) {
+    console.warn("[ai-verify] Verification skipped:", String(err?.message || err));
+    return "";
+  }
+}
+
+async function aiGetDiagnostics(root, filePath, turnContext = null) {
   if (!root) return "No project workspace is currently open.";
 
   if (filePath) {
@@ -925,61 +687,27 @@ async function aiGetDiagnostics(root, filePath) {
     if (resolved.error) return resolved.error;
 
     let content = "";
-    try {
-      content = await promises.readFile(resolved.path, "utf8");
-    } catch {
-      return `Could not read file: ${resolved.relative}`;
-    }
-
-    const items = [];
-    const isTsJs = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(resolved.path);
-
-    if (isTsJs && typeof tsCall === "function") {
+    const hasStaged = Boolean(turnContext?.stagedFiles?.has(resolved.path));
+    if (hasStaged) {
+      content = turnContext.stagedFiles.get(resolved.path);
+    } else {
       try {
-        const tsResult = await tsCall("diagnostics", [root, resolved.path], { diagnostics: [] });
-        const list = Array.isArray(tsResult?.diagnostics) ? tsResult.diagnostics : [];
-        for (const item of list) {
-          const pos = aiOffsetToPosition(content, item.from ?? 0);
-          items.push({
-            source: "TypeScript",
-            line: pos.line,
-            col: pos.col,
-            severity: item.severity || "error",
-            code: item.code ? `TS${item.code}` : "",
-            message: String(item.message || ""),
-          });
-        }
-      } catch (e) {
-        void e;
+        content = await promises.readFile(resolved.path, "utf8");
+      } catch {
+        return `Could not read file: ${resolved.relative}`;
       }
     }
 
-    if (isTsJs && typeof runLinter === "function") {
-      try {
-        const lintResult = await runLinter({ root, filePath: resolved.path, text: content });
-        if (lintResult && lintResult.ok && Array.isArray(lintResult.diagnostics)) {
-          for (const item of lintResult.diagnostics) {
-            const pos = aiOffsetToPosition(content, item.from ?? 0);
-            items.push({
-              source: "ESLint",
-              line: pos.line,
-              col: pos.col,
-              severity: item.severity || "warning",
-              code: "",
-              message: String(item.message || ""),
-            });
-          }
-        }
-      } catch (e) {
-        void e;
-      }
-    }
+    const items = await aiRunFileDiagnostics(root, resolved.path, content, {
+      syncContent: hasStaged,
+      restoreAfter: hasStaged,
+      timeoutMs: 8000,
+    });
 
     if (items.length === 0) {
       return `No syntax, type, or lint diagnostics found in ${resolved.relative}. Code is clean!`;
     }
 
-    items.sort((a, b) => a.line - b.line || a.col - b.col);
     const lines = [
       `Found ${items.length} diagnostic(s) in ${resolved.relative}:`,
       ...items.map(
@@ -1236,8 +964,8 @@ async function aiLoadAgentRules(root) {
       const raw = JSON.parse(await promises.readFile(wsAgentFile, "utf8"));
       const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
       if (list.length > 0) return { source: wsAgentFile, rules: aiMergeEmbeddedAgentRules(list) };
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("ai-agent", "load .wide/agent-rules.json failed", error, { ignoreCodes: ["ENOENT"] });
     }
     const wsFile = node_path.join(root, ".wide", "rules.json");
     try {
@@ -1278,15 +1006,7 @@ async function aiLoadAgentRules(root) {
 
 
 function aiFormatAgentInstructions(rules) {
-  const list = Array.isArray(rules) ? rules : [];
-  const lines = [];
-  for (const r of list) {
-    const text = (r.instruction || r.message || "").trim();
-    if (text) {
-      lines.push(`- ${text}`);
-    }
-  }
-  return lines.join("\n");
+  return __wideTs.aiFormatAgentInstructions(rules);
 }
 
 function aiSanitizeAgentOutput(text, rules, options = {}) {
@@ -1299,8 +1019,8 @@ function aiSanitizeAgentOutput(text, rules, options = {}) {
       try {
         const flags = String(r.pattern).includes("\\uD800") ? "g" : "gu";
         result = result.replace(new RegExp(r.pattern, flags), "");
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("ai-agent", `invalid agent output sanitizer rule (${r.id || "unknown"})`, error);
       }
     }
   }
@@ -1424,12 +1144,20 @@ function aiExecuteGetOpenTabs(root) {
   return `Currently open tabs in Wide editor (${aiLastKnownOpenTabs.length} tab${aiLastKnownOpenTabs.length > 1 ? "s" : ""}):\n${formatted.join("\n")}`;
 }
 
-async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt = "", signal = null) {
+async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt = "", signal = null, turnContext = null) {
   if (signal?.aborted) return "Turn was stopped.";
   try {
-    const normalized = aiNormalizeToolCall(rawName, rawInput);
-    const name = normalized.name;
-    const input = normalized.input;
+    const toolMode = turnContext?.toolMode || "full";
+    const allowBrowser = turnContext ? turnContext.allowBrowser !== false : true;
+    const reviewEnabled = Boolean(turnContext?.reviewEnabled);
+    const stagedFiles = turnContext?.stagedFiles || null;
+
+    const validation = aiValidateToolCall(rawName, rawInput, { allowWrites, toolMode, allowBrowser });
+    if (!validation.ok) {
+      return validation.error;
+    }
+    const name = validation.name;
+    const input = validation.input;
 
     if (name === "write_file" || name === "edit_file" || name === "delete_file") {
       const resolved = aiResolvePath(root, input.path);
@@ -1445,15 +1173,6 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       const allowed = aiAllowed("ai:tool.mcp", [name]);
       if (!allowed.ok) return allowed.reason;
       return aiTrim(await mcpCallTool(name, input ?? {}));
-    }
-
-    if (AI_WRITE_TOOLS.has(name) && !allowWrites) {
-      return `The tool ${name} is disabled because AI writes are turned off in settings.`;
-    }
-
-    const missing = aiMissingArgs(name, input);
-    if (missing.length > 0) {
-      return `The call to ${name} arrived without required arguments (${missing.join(", ")}). Call ${name} again with all required fields.`;
     }
 
     if (name === "find_relevant") {
@@ -1476,16 +1195,30 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       );
     }
 
-    if (name === "read_file") {
+    if (name === "read_file" || name === "read_document") {
       const resolved = aiResolvePath(root, input.path);
       if (resolved.error) return resolved.error;
       const allowed = aiAllowed("ai:tool.read", [root, resolved.path]);
       if (!allowed.ok) return allowed.reason;
-      const stats = await promises.stat(resolved.path);
-      if (stats.size > MAX_FILE_BYTES$1) {
-        return `That file is ${stats.size} bytes, too large to read.`;
+      let content = "";
+      if (stagedFiles && stagedFiles.has(resolved.path)) {
+        content = stagedFiles.get(resolved.path);
+      } else {
+        const stats = await promises.stat(resolved.path);
+        if (stats.size > MAX_FILE_BYTES$1) {
+          return `That file is ${stats.size} bytes, too large to read.`;
+        }
+        if (__wideTs?.isDocxPath?.(resolved.path) && __wideTs?.extractDocxText) {
+          const rawBuf = await promises.readFile(resolved.path);
+          const doc = __wideTs.extractDocxText(rawBuf);
+          if (!doc.ok) {
+            return `Unable to read .docx document ${resolved.relative}: ${doc.error}`;
+          }
+          content = doc.text;
+        } else {
+          content = await promises.readFile(resolved.path, "utf8");
+        }
       }
-      const content = await promises.readFile(resolved.path, "utf8");
       send({ type: "file_read", root, path: resolved.path, content });
       const allLines = content.split("\n");
       const start = Number.isFinite(Number(input.startLine)) ? Math.max(1, Math.floor(Number(input.startLine))) : 1;
@@ -1534,17 +1267,28 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       if (!allowed.ok) return allowed.reason;
       let existed = true;
       let oldContent = "";
-      try {
-        oldContent = await promises.readFile(resolved.path, "utf8");
-      } catch {
-        existed = false;
+      if (stagedFiles && stagedFiles.has(resolved.path)) {
+        oldContent = stagedFiles.get(resolved.path);
+      } else {
+        try {
+          oldContent = await promises.readFile(resolved.path, "utf8");
+        } catch {
+          existed = false;
+        }
       }
       const newContent = String(input.content ?? "");
+      const { added, removed } = aiDiffCounts(oldContent, newContent);
+      if (reviewEnabled) {
+        if (stagedFiles) stagedFiles.set(resolved.path, newContent);
+        send({ type: "edit", root, path: resolved.path, oldContent, content: newContent, existed, staged: true, added, removed });
+        const verifyNote = await aiVerifyEditedFile(root, resolved.path, resolved.relative, newContent, true, send);
+        return `Staged ${resolved.relative} (${Buffer.byteLength(newContent, "utf8")} bytes) for user review; disk unchanged until accepted.${verifyNote}`;
+      }
       await promises.mkdir(node_path.dirname(resolved.path), { recursive: true });
       await writeFileAtomic(resolved.path, newContent, "utf8");
-      const { added, removed } = aiDiffCounts(oldContent, newContent);
-      send({ type: "edit", root, path: resolved.path, oldContent, content: newContent, existed, added, removed });
-      return `Successfully ${existed ? "updated" : "created"} ${resolved.relative} (${Buffer.byteLength(newContent, "utf8")} bytes) in the project workspace.`;
+      send({ type: "edit", root, path: resolved.path, oldContent, content: newContent, existed, staged: false, added, removed });
+      const verifyNote = await aiVerifyEditedFile(root, resolved.path, resolved.relative, newContent, false, send);
+      return `Successfully ${existed ? "updated" : "created"} ${resolved.relative} (${Buffer.byteLength(newContent, "utf8")} bytes) in the project workspace.${verifyNote}`;
     }
 
     if (name === "edit_file") {
@@ -1553,10 +1297,14 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       const allowed = aiAllowed("ai:tool.write", [root, resolved.path]);
       if (!allowed.ok) return allowed.reason;
       let content;
-      try {
-        content = await promises.readFile(resolved.path, "utf8");
-      } catch {
-        return `Could not read ${resolved.relative}. If it does not exist yet, create it with write_file.`;
+      if (stagedFiles && stagedFiles.has(resolved.path)) {
+        content = stagedFiles.get(resolved.path);
+      } else {
+        try {
+          content = await promises.readFile(resolved.path, "utf8");
+        } catch {
+          return `Could not read ${resolved.relative}. If it does not exist yet, create it with write_file.`;
+        }
       }
       const find = String(input.find ?? "");
       if (!find) return "edit_file needs a non-empty `find` snippet.";
@@ -1584,10 +1332,17 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
         }
       }
 
-      await writeFileAtomic(resolved.path, next, "utf8");
       const { added, removed } = aiDiffCounts(content, next);
-      send({ type: "edit", root, path: resolved.path, oldContent: content, content: next, existed: true, added, removed });
-      return `Successfully edited ${resolved.relative} in the project workspace.`;
+      if (reviewEnabled) {
+        if (stagedFiles) stagedFiles.set(resolved.path, next);
+        send({ type: "edit", root, path: resolved.path, oldContent: content, content: next, existed: true, staged: true, added, removed });
+        const verifyNote = await aiVerifyEditedFile(root, resolved.path, resolved.relative, next, true, send);
+        return `Staged edit for ${resolved.relative} for user review; disk unchanged until accepted.${verifyNote}`;
+      }
+      await writeFileAtomic(resolved.path, next, "utf8");
+      send({ type: "edit", root, path: resolved.path, oldContent: content, content: next, existed: true, staged: false, added, removed });
+      const verifyNote = await aiVerifyEditedFile(root, resolved.path, resolved.relative, next, false, send);
+      return `Successfully edited ${resolved.relative} in the project workspace.${verifyNote}`;
     }
 
     if (name === "create_dir") {
@@ -1604,12 +1359,15 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       if (resolved.error) return resolved.error;
       const allowed = aiAllowed("ai:tool.write", [root, resolved.path]);
       if (!allowed.ok) return allowed.reason;
+      if (reviewEnabled) {
+        return `Skipped immediate deletion of ${resolved.relative} while edit review gate is active.`;
+      }
       await promises.rm(resolved.path, { force: true });
       return `Deleted ${resolved.relative}.`;
     }
 
     if (name === "run_command") {
-      if (!allowWrites) return "Running commands is turned off. The person can turn on AI writes and commands in the AI settings.";
+      if (!allowWrites) return "Running commands is turned off. Switch from Ask mode to Agent mode or enable AI writes in settings.";
       if (!root) return "No project is open.";
       const command = String(input.command ?? "").trim();
       if (!command) return "run_command needs a command line.";
@@ -1643,7 +1401,7 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
       if (!AI_GIT_READ.has(sub) && !mutating) {
         return `git ${sub} is not in the allowed set (status, diff, log, show, branch, rev-parse, remote, add, commit).`;
       }
-      if (mutating && !allowWrites) return "Git writes (add/commit) are turned off. The person can turn on AI writes in the AI settings.";
+      if (mutating && !allowWrites) return "Git writes (add/commit) are turned off in Ask mode or when AI writes are disabled.";
       const allowed = aiAllowed(mutating ? "ai:tool.write" : "ai:tool.search", [root]);
       if (!allowed.ok) return allowed.reason;
       return await aiRunGit(root, args, signal);
@@ -1664,11 +1422,19 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
     }
 
     if (name === "get_diagnostics") {
-      return await aiGetDiagnostics(root, input.path);
+      return await aiGetDiagnostics(root, input.path, turnContext);
     }
 
     if (name === "send_http_request" || name === "pitcher_send") {
       return await aiExecutePitcherSend(root, input, send, signal);
+    }
+
+    if (name === "crawl_target") {
+      return await aiExecuteCrawlTarget(input, send);
+    }
+
+    if (name === "inspect_http_message") {
+      return aiExecuteInspectHttpMessage(input, send);
     }
 
     if (name === "pitcher_env") {
@@ -1846,7 +1612,7 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
     }
 
     if (name === "browser_extract") {
-      return await aiExecuteBrowserExtract(input.selector, input.mode, send);
+      return await aiExecuteBrowserExtract(input.selector, input.mode, send, input);
     }
 
     if (name === "browser_console") {
@@ -1894,29 +1660,6 @@ async function aiRunTool(root, rawName, rawInput, send, allowWrites, userPrompt 
   }
 }
 
-async function aiRunTurn({ provider, model, key, root, system, systemWithXmlCatalog, messages, allowWrites, effort = "fast", signal, send }) {
-  try {
-    return await aiRunUnifiedTurn({
-      provider,
-      model,
-      key,
-      root,
-      system,
-      systemWithXmlCatalog: systemWithXmlCatalog || system,
-      messages,
-      allowWrites,
-      effort,
-      signal,
-      send,
-    });
-  } catch (error) {
-    if (signal?.aborted) return { ok: false, error: "stopped" };
-    const message = String(error?.message || error || "Stream failed.");
-    send({ type: "error", message });
-    return { ok: false, error: message };
-  }
-}
-
 const aiTurns = new Map();
 
 async function aiWorkspaceOverview(root) {
@@ -1933,27 +1676,33 @@ async function aiWorkspaceOverview(root) {
   }
 }
 
-function aiBuildToolCatalogPrompt(allowWrites) {
-  const available = allowWrites ? AI_TOOLS : AI_TOOLS.filter((tool) => !AI_WRITE_TOOLS.has(tool.name));
+function aiBuildToolCatalogPrompt(optsOrAllowWrites) {
+  const available = aiFilterTools(optsOrAllowWrites);
   const specs = available.map((tool) => ({
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
   }));
+  const exampleBlocks = [
+    available.some((t) => t.name === "read_file")
+      ? "<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"app.js\"}}\n</tool_call>"
+      : "",
+    available.some((t) => t.name === "browser_open")
+      ? "<tool_call>\n{\"name\": \"browser_open\", \"arguments\": {\"url\": \"https://example.com\"}}\n</tool_call>"
+      : "",
+    available.some((t) => t.name === "catcher_control")
+      ? "<tool_call>\n{\"name\": \"catcher_control\", \"arguments\": {\"action\": \"start\"}}\n</tool_call>"
+      : "",
+    available.some((t) => t.name === "write_file")
+      ? "<tool_call>\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"app.js\", \"content\": \"console.log(1);\\n\"}}\n</tool_call>"
+      : "",
+  ].filter(Boolean);
   return [
     "## Available Tools (XML Fallback)",
     JSON.stringify(specs),
     "",
     "Invoke any tool using a <tool_call> XML block:",
-    "<tool_call>",
-    "{\"name\": \"browser_open\", \"arguments\": {\"url\": \"https://example.com\"}}",
-    "</tool_call>",
-    "<tool_call>",
-    "{\"name\": \"catcher_control\", \"arguments\": {\"action\": \"start\"}}",
-    "</tool_call>",
-    "<tool_call>",
-    "{\"name\": \"write_file\", \"arguments\": {\"path\": \"app.js\", \"content\": \"console.log(1);\\n\"}}",
-    "</tool_call>",
+    ...exampleBlocks,
   ].join("\n");
 }
 
@@ -2019,9 +1768,117 @@ const AI_LANGUAGE_NAMES = {
   ko: "Korean",
 };
 
+function aiFilterGuardrailsByContext(rules, { allowWrites, toolMode, allowBrowser }) {
+  return __wideTs.aiFilterGuardrailsByContext(rules, { allowWrites, toolMode, allowBrowser });
+}
+
+async function aiExecuteCrawlTarget(input = {}, send) {
+  const rawUrl = String(input.url || "").trim();
+  if (!rawUrl) return "Missing required argument: 'url'.";
+  if (typeof reconStartCrawl !== "function") {
+    return "Recon spider engine is unavailable.";
+  }
+  const pages = [];
+  const res = await reconStartCrawl(
+    {
+      seeds: [rawUrl],
+      maxDepth: input.maxDepth ?? 2,
+      maxPages: input.maxPages ?? 40,
+      fieldScope: input.fieldScope || "rdn",
+      allowPrivate: Boolean(input.allowPrivate),
+      probePaths: input.probePaths !== false,
+      tlsProfile: input.tlsProfile || "none",
+      mode: input.mode || "standard",
+    },
+    (ev) => {
+      if (ev?.type === "page" && ev.page) {
+        const p = ev.page;
+        const insp = __wideTs?.evaluateHttpInspection
+          ? __wideTs.evaluateHttpInspection({
+              url: p.finalUrl || p.url,
+              method: "GET",
+              headers: p.headers || {},
+              body: "",
+            })
+          : null;
+        pages.push({
+          url: p.finalUrl || p.url,
+          fingerprint: p.fingerprint,
+          status: p.status,
+          depth: p.depth,
+          title: p.title,
+          linksCount: Array.isArray(p.links) ? p.links.length : 0,
+          formsCount: Array.isArray(p.forms) ? p.forms.length : 0,
+          endpointClass: p.audit?.endpointClass,
+          technologies: p.audit?.technologies || [],
+          securityHeaderIssues: Array.isArray(p.audit?.securityHeaders) ? p.audit.securityHeaders.length : 0,
+          jwtCount: Array.isArray(p.audit?.jwtTokens) ? p.audit.jwtTokens.length : 0,
+          secretCount: Array.isArray(p.audit?.secrets) ? p.audit.secrets.length : 0,
+          inspectAction: insp ? insp.action : "pass",
+          inspectTrigger: insp ? insp.trigger : null,
+        });
+      }
+    },
+  );
+  if (!res?.ok) {
+    return `Target crawl failed: ${res?.error || "Unknown error"}`;
+  }
+  if (typeof aiEmitToolSync === "function") {
+    aiEmitToolSync(send, "recon", {
+      crawlId: res.crawlId,
+      visited: res.visited,
+      pagesCount: pages.length,
+    });
+  }
+  return JSON.stringify(
+    {
+      ok: true,
+      crawlId: res.crawlId,
+      seed: rawUrl,
+      visited: res.visited,
+      pages: pages.slice(0, 60),
+      stateGraph: res.graph
+        ? {
+            nodes: (res.graph.nodes || []).length,
+            edges: (res.graph.edges || []).length,
+          }
+        : undefined,
+    },
+    null,
+    2,
+  );
+}
+
+function aiExecuteInspectHttpMessage(input = {}, send) {
+  if (!__wideTs?.evaluateHttpInspection) {
+    return "HTTP inspection engine is unavailable.";
+  }
+  const report = __wideTs.evaluateHttpInspection(
+    {
+      url: String(input.url || "/"),
+      method: String(input.method || "GET"),
+      headers: input.headers || {},
+      body: typeof input.body === "string" ? input.body : "",
+      rawRequest: typeof input.rawRequest === "string" ? input.rawRequest : undefined,
+      rawResponse: typeof input.rawResponse === "string" ? input.rawResponse : undefined,
+    },
+    {
+      learning: Boolean(input.learning),
+      level: Number.isFinite(Number(input.level)) ? Number(input.level) : 2,
+    },
+  );
+  if (typeof aiEmitToolSync === "function") {
+    aiEmitToolSync(send, "catcher", { inspectReport: report });
+  }
+  return JSON.stringify(report, null, 2);
+}
+
 async function aiBuildAgentSystemPrompt(system, root, allowWrites, projectInstructions = "", effort = "fast", opts = {}) {
   const agentRulesObj = opts.agentRulesObj || await aiLoadAgentRules(root);
-  const guardrailsPrompt = aiFormatAgentInstructions(agentRulesObj.rules);
+  const toolMode = aiNormalizeToolMode(opts.toolMode);
+  const allowBrowser = opts.allowBrowser !== false;
+  const interactionMode = opts.interactionMode === "ask" ? "ask" : "agent";
+  const guardrailsPrompt = aiFilterGuardrailsByContext(agentRulesObj.rules, { allowWrites, toolMode, allowBrowser });
   const overview = await aiWorkspaceOverview(root);
   const trimmedSystem = String(system || "").trim();
   const hasInstructionsInSystem = projectInstructions && trimmedSystem.includes(projectInstructions);
@@ -2037,9 +1894,36 @@ async function aiBuildAgentSystemPrompt(system, root, allowWrites, projectInstru
     ? "Effort mode THINKING: reason thoroughly inside <think>...</think> before acting, verify code and tool outputs, and apply complete fixes."
     : "Effort mode FAST: execute required tools immediately and deliver direct, verified results without preamble.";
 
+  const roleHeader =
+    toolMode === "code"
+      ? "# Wide IDE Autonomous Software Engineering Agent"
+      : toolMode === "security"
+        ? "# Wide IDE Autonomous Application Security Agent"
+        : "# Wide IDE Autonomous Engineering and Security Agent";
+
+  const capabilityParts = ["workspace files"];
+  if (toolMode !== "security") {
+    capabilityParts.push("TypeScript/LSP diagnostics, debugger, and test runner");
+  }
+  if (allowWrites) {
+    capabilityParts.push("terminal execution");
+  }
+  if (allowBrowser) {
+    capabilityParts.push("interactive Chromium browser (browser_*)");
+  }
+  if (toolMode !== "code") {
+    capabilityParts.push("Catcher proxy/Repeater/Intruder, Pitcher API client, AST Security Scanner, and Decoder");
+  }
+  const roleCapabilities = `Active mode is ${toolMode.toUpperCase()} (${interactionMode.toUpperCase()}, browser=${allowBrowser ? "ON" : "OFF"}). You have programmatic control over ${capabilityParts.join(", ")}.`;
+
+  const interactionRule = !allowWrites || interactionMode === "ask"
+    ? "Read-only ASK mode is active: explain, analyze, or propose code blocks in chat without modifying files or executing commands."
+    : "Use strict tool schemas exactly as declared; when write_file or edit_file returns post-edit verification diagnostics, fix any reported errors before finishing.";
+
   const coreRules = [
-    "# Wide IDE Autonomous Engineering and Security Agent",
-    "You operate inside Wide IDE with direct programmatic control over workspace files, terminal execution, interactive Chromium browser (browser_*), Catcher proxy/Repeater/Intruder (catcher_*, repeater_send, intruder_attack), Pitcher API client, AST Security Scanner, and Decoder.",
+    roleHeader,
+    roleCapabilities,
+    interactionRule,
     "Formatting constraint: output plain technical prose and code only. Never use emojis, emoticons, or decorative Unicode icons in responses, headings, bullet points, status markers, thinking, comments, tool arguments, or code.",
     root ? `Active project workspace: ${root}` : "No workspace folder is currently open.",
     activeFile ? `Active editor file: ${activeFile}` : "",
@@ -2048,11 +1932,19 @@ async function aiBuildAgentSystemPrompt(system, root, allowWrites, projectInstru
     effortRules,
     langName ? `Default response language setting: ${langName}.` : "",
     "Never modify or overwrite .wide/ai-instructions.md unless the user explicitly instructs you to update project instructions.",
+    __wideTs?.aiBuildWideCapabilityPlaybook
+      ? __wideTs.aiBuildWideCapabilityPlaybook({
+          allowWrites: Boolean(allowWrites),
+          toolMode,
+          allowBrowser,
+          isExternalCli: false,
+        })
+      : "",
     guardrailsPrompt ? `## Ecosystem Guardrails (wide-rules)\n${guardrailsPrompt}` : "",
     projectInstructions && !hasInstructionsInSystem
       ? `## Project AI Instructions (.wide/ai-instructions.md)\n${projectInstructions}`
       : "",
-    opts.includeXmlToolCatalog ? aiBuildToolCatalogPrompt(allowWrites) : "",
+    opts.includeXmlToolCatalog ? aiBuildToolCatalogPrompt({ allowWrites, toolMode, allowBrowser }) : "",
   ]
     .filter((line) => line !== undefined && line !== "")
     .join("\n\n");
@@ -2093,7 +1985,7 @@ function aiApplyImages(messages, provider) {
     const { images: _drop, ...rest } = message;
     const text = String(rest.content ?? "");
 
-    if (provider === "claude") {
+    if (provider === "claude-code" || provider === "antigravity" || provider === "codex") {
       return {
         ...rest,
         content: [
@@ -2101,19 +1993,6 @@ function aiApplyImages(messages, provider) {
           ...images.map((image) => ({
             type: "image",
             source: { type: "base64", media_type: image.mime, data: image.data },
-          })),
-        ],
-      };
-    }
-
-    if (provider === "deepseek") {
-      return {
-        ...rest,
-        content: [
-          ...(text ? [{ type: "text", text }] : []),
-          ...images.map((image) => ({
-            type: "image_url",
-            image_url: { url: `data:${image.mime};base64,${image.data}` },
           })),
         ],
       };
@@ -2154,7 +2033,7 @@ function registerAiAgentHandlers() {
     const {
       id,
       root = "",
-      provider = "deepseek",
+      provider: reqProvider = "claude-code",
       model = "",
       messages = [],
       system = "",
@@ -2162,7 +2041,18 @@ function registerAiAgentHandlers() {
       language = "en",
       activeFile = "",
       openTabs = [],
+      toolMode: reqToolMode,
+      interactionMode: reqInteractionMode,
+      allowBrowser: reqAllowBrowser,
+      reviewEnabled: reqReviewEnabled = false,
     } = request ?? {};
+    const provider =
+      reqProvider === "local" ||
+      reqProvider === "claude-code" ||
+      reqProvider === "antigravity" ||
+      reqProvider === "codex"
+        ? reqProvider
+        : "claude-code";
     const cleanEffort = effort === "thinking" ? "thinking" : "fast";
     if (Array.isArray(openTabs)) {
       aiLastKnownOpenTabs = openTabs;
@@ -2179,17 +2069,35 @@ function registerAiAgentHandlers() {
     }
 
     const config = await readAiConfig();
-    const key = await aiKeyFor(provider === "claude-code" ? "claude" : provider);
-    if (!key && provider !== "claude-code" && provider !== "opencode" && provider !== "local") {
-      return { ok: false, error: "no-key" };
-    }
+
+    const cleanToolMode = aiNormalizeToolMode(reqToolMode ?? config.toolMode);
+    const cleanInteractionMode = (reqInteractionMode ?? config.interactionMode) === "ask" ? "ask" : "agent";
+    const cleanAllowBrowser = reqAllowBrowser !== undefined ? Boolean(reqAllowBrowser) : config.allowBrowser !== false;
+    const effectiveAllowWrites = config.allowWrites !== false && cleanInteractionMode !== "ask";
+    const turnContext = {
+      allowWrites: effectiveAllowWrites,
+      toolMode: cleanToolMode,
+      allowBrowser: cleanAllowBrowser,
+      interactionMode: cleanInteractionMode,
+      reviewEnabled: Boolean(reqReviewEnabled),
+      stagedFiles: new Map(),
+    };
 
     const projInstr = await aiReadProjectInstructions(root);
     const agentRulesObj = await aiLoadAgentRules(root);
-    const promptOpts = { language, activeFile, openTabs, includeXmlToolCatalog: false, agentRulesObj };
-    const prompt = await aiBuildAgentSystemPrompt(system, root, config.allowWrites, projInstr.content, cleanEffort, promptOpts);
+    const promptOpts = {
+      language,
+      activeFile,
+      openTabs,
+      toolMode: cleanToolMode,
+      allowBrowser: cleanAllowBrowser,
+      interactionMode: cleanInteractionMode,
+      includeXmlToolCatalog: false,
+      agentRulesObj,
+    };
+    const prompt = await aiBuildAgentSystemPrompt(system, root, effectiveAllowWrites, projInstr.content, cleanEffort, promptOpts);
     const promptWithXmlCatalog = provider === "local"
-      ? `${prompt}\n\n${aiBuildToolCatalogPrompt(config.allowWrites)}`
+      ? `${prompt}\n\n${aiBuildToolCatalogPrompt({ allowWrites: effectiveAllowWrites, toolMode: cleanToolMode, allowBrowser: cleanAllowBrowser })}`
       : prompt;
     const turn = aiApplyImages(aiWithAgentDirective(messages), provider);
 
@@ -2199,11 +2107,11 @@ function registerAiAgentHandlers() {
     const controller = new AbortController();
     aiTurns.set(id, controller);
 
-    if (provider !== "claude-code" && provider !== "opencode") {
+    if (provider === "local") {
       try {
         await ensureMcp(root);
-      } catch {
-        void 0;
+      } catch (mcpErr) {
+        console.warn("[ai] ensureMcp warning:", String(mcpErr?.message || mcpErr));
       }
     }
     if (controller.signal.aborted) {
@@ -2256,23 +2164,60 @@ function registerAiAgentHandlers() {
       if (provider === "claude-code") {
         return await aiRunClaudeCodeTurn({
           root,
+          sessionId: String(request?.sessionId || String(id).split(":")[0] || id || ""),
           model,
+          fallbackModel: request?.fallbackModel ?? config.claudeFallbackModel ?? "",
+          effort: request?.claudeEffort ?? config.claudeEffort ?? "high",
           system: prompt,
           messages: turn,
-          allowWrites: config.allowWrites,
+          allowWrites: effectiveAllowWrites,
+          toolMode: cleanToolMode,
+          allowBrowser: cleanAllowBrowser,
+          interactionMode: cleanInteractionMode,
+          language,
+          activeFile,
+          openTabs,
+          turnContext,
           signal: controller.signal,
           send,
         });
       }
-      if (provider === "opencode") {
-        return await aiRunOpenCodeTurn({
+      if (provider === "antigravity") {
+        return await aiRunAntigravityTurn({
           root,
+          sessionId: String(request?.sessionId || String(id).split(":")[0] || id || ""),
           model,
+          effort: request?.antigravityEffort ?? config.antigravityEffort ?? "high",
           system: prompt,
-          messages,
-          projectInstructions: projInstr.content,
-          allowWrites: config.allowWrites,
-          effort: cleanEffort,
+          messages: turn,
+          allowWrites: effectiveAllowWrites,
+          toolMode: cleanToolMode,
+          allowBrowser: cleanAllowBrowser,
+          interactionMode: cleanInteractionMode,
+          language,
+          activeFile,
+          openTabs,
+          turnContext,
+          signal: controller.signal,
+          send,
+        });
+      }
+      if (provider === "codex") {
+        return await aiRunCodexTurn({
+          root,
+          sessionId: String(request?.sessionId || String(id).split(":")[0] || id || ""),
+          model,
+          effort: request?.codexEffort ?? config.codexEffort ?? "high",
+          system: prompt,
+          messages: turn,
+          allowWrites: effectiveAllowWrites,
+          toolMode: cleanToolMode,
+          allowBrowser: cleanAllowBrowser,
+          interactionMode: cleanInteractionMode,
+          language,
+          activeFile,
+          openTabs,
+          turnContext,
           signal: controller.signal,
           send,
         });
@@ -2284,25 +2229,16 @@ function registerAiAgentHandlers() {
           system: prompt,
           systemWithXmlCatalog: promptWithXmlCatalog,
           messages: turn,
-          allowWrites: config.allowWrites,
+          allowWrites: effectiveAllowWrites,
+          toolMode: cleanToolMode,
+          allowBrowser: cleanAllowBrowser,
+          turnContext,
           effort: cleanEffort,
           signal: controller.signal,
           send,
         });
       }
-      return await aiRunTurn({
-        provider,
-        model,
-        key,
-        root,
-        system: prompt,
-        systemWithXmlCatalog: promptWithXmlCatalog,
-        messages: turn,
-        allowWrites: config.allowWrites,
-        effort: cleanEffort,
-        signal: controller.signal,
-        send,
-      });
+      return { ok: false, error: `Unsupported provider: ${provider}` };
     } catch (error) {
       if (controller.signal.aborted) return { ok: false, error: "stopped" };
       send({ type: "error", message: String(error.message || error) });
@@ -2341,32 +2277,35 @@ function registerAiAgentHandlers() {
           messages,
           signal: controller.signal,
         });
-      } else if (provider === "opencode") {
-        await aiRunOpenCodeTurn({
-          root: "",
-          model,
-          system,
-          messages,
-          projectInstructions: "",
-          allowWrites: false,
-          effort: "fast",
+      } else if (provider === "claude-code") {
+        const completionRes = await aiCompleteClaudeCode({
+          prefix,
+          suffix,
+          language,
           signal: controller.signal,
-          send: (event) => {
-            if (event.type === "text" && typeof event.text === "string") text += event.text;
-          },
         });
+        if (!completionRes.ok) return { ok: false };
+        text = completionRes.completion;
+      } else if (provider === "antigravity") {
+        const completionRes = await aiCompleteAntigravity({
+          prefix,
+          suffix,
+          language,
+          signal: controller.signal,
+        });
+        if (!completionRes.ok) return { ok: false };
+        text = completionRes.completion;
+      } else if (provider === "codex") {
+        const completionRes = await aiCompleteCodex({
+          prefix,
+          suffix,
+          language,
+          signal: controller.signal,
+        });
+        if (!completionRes.ok) return { ok: false };
+        text = completionRes.completion;
       } else {
-        const key = await aiKeyFor(provider === "claude-code" ? "claude" : provider);
-        if (!key) return { ok: false };
-        const effectiveProvider = provider === "claude-code" ? "claude" : provider;
-        text = await aiCompleteSdk({
-          provider: effectiveProvider,
-          model,
-          key,
-          system,
-          messages,
-          signal: controller.signal,
-        });
+        return { ok: false };
       }
     } catch {
       return { ok: false };
@@ -2381,15 +2320,65 @@ function registerAiAgentHandlers() {
   });
 
   electron.ipcMain.handle("ai:compact", async (_event, request = {}) => {
-    const { provider = "deepseek", model = "", messages = [] } = request;
-    const key = await aiKeyFor(provider === "claude-code" ? "claude" : provider);
+    const { provider = "claude-code", model = "", messages = [], sessionId = "" } = request;
+    if (provider === "claude-code" && typeof aiCompactClaudeCode === "function") {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45000);
+      try {
+        const summary = await aiCompactClaudeCode({
+          sessionId,
+          model,
+          messages,
+          signal: controller.signal,
+        });
+        if (summary) {
+          return { ok: true, summary: aiSanitizeAgentOutput(summary) };
+        }
+      } catch {} finally {
+        clearTimeout(timer);
+      }
+    }
+    if (provider === "antigravity" && typeof aiCompactAntigravity === "function") {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45000);
+      try {
+        const summary = await aiCompactAntigravity({
+          sessionId,
+          model,
+          messages,
+          signal: controller.signal,
+        });
+        if (summary) {
+          return { ok: true, summary: aiSanitizeAgentOutput(summary) };
+        }
+      } catch {} finally {
+        clearTimeout(timer);
+      }
+    }
+    if (provider === "codex" && typeof aiCompactCodex === "function") {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45000);
+      try {
+        const summary = await aiCompactCodex({
+          sessionId,
+          model,
+          messages,
+          signal: controller.signal,
+        });
+        if (summary) {
+          return { ok: true, summary: aiSanitizeAgentOutput(summary) };
+        }
+      } catch {} finally {
+        clearTimeout(timer);
+      }
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25000);
     try {
       const raw = await aiCompactSdk({
         provider,
         model,
-        key: key || "",
+        key: "",
         messages,
         signal: controller.signal,
       });
@@ -2452,13 +2441,6 @@ function registerAiAgentHandlers() {
     } catch (error) {
       return { ok: false, error: String((error && error.message) || error) };
     }
-  });
-
-  electron.ipcMain.handle("ai:verifyKey", async (_event, provider, key) => {
-    const gate = await requireInstalled("ai-assistant");
-    if (gate) return gate;
-    const result = await aiVerifyKey(provider, String(key ?? "").trim());
-    return result;
   });
 
   electron.ipcMain.handle("ai:permissionReply", async (_event, requestId, allowed, reason) => {

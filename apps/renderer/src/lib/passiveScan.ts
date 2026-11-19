@@ -317,5 +317,64 @@ export function passiveChecks(entry: ProxyEntry): PassiveIssue[] {
     });
   }
 
+  for (const [label, pairs] of [
+    ["request", req],
+    ["response", res],
+  ] as const) {
+    const clVals = pairs.filter(([n]) => n.toLowerCase() === "content-length").map(([, v]) => v.trim());
+    const teVals = pairs.filter(([n]) => n.toLowerCase() === "transfer-encoding").map(([, v]) => v.trim().toLowerCase());
+    if (clVals.length > 1 || (clVals.length > 0 && teVals.length > 0) || teVals.some((t) => t !== "chunked")) {
+      issues.push({
+        checkId: `rfc9112-smuggling-${label}`,
+        title: `RFC 9112 HTTP ${label} smuggling ambiguity`,
+        severity: "high",
+        detail: at(`Conflicting or malformed Content-Length / Transfer-Encoding framing in ${label} headers.`),
+        pocRequest: rawRequest,
+        pocResponse: rawResponse,
+        remediation: "Enforce strict RFC 9112 framing: reject duplicate Content-Length and CL+TE combinations.",
+      });
+    }
+  }
+
+  const reqSample = `${entry.url}\n${entry.reqBody || ""}`;
+  if (/%u[0-9a-f]{4}|%00|%25[0-9a-f]{2}/i.test(reqSample)) {
+    issues.push({
+      checkId: "encoding-evasion-signal",
+      title: "HTTP encoding evasion signal",
+      severity: "medium",
+      detail: at("Request contains IIS %uXXXX escape, %00 NUL byte, or double percent encoding."),
+      pocRequest: rawRequest,
+      pocResponse: rawResponse,
+      remediation: "Decode once, reject null/overlong bytes and ambiguous %uXXXX escapes prior to routing.",
+    });
+  }
+
+  const decodedReq = reqSample
+    .replace(/\+/g, " ")
+    .replace(/%u([0-9a-f]{4})/gi, (_m, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/%([0-9a-f]{2})/gi, (_m, hex) => String.fromCharCode(parseInt(hex, 16)));
+  if (/\bunion(?:\s|\/\*[\s\S]*?\*\/)+select\b|(?:'|")\s*(?:or|and)\s+(?:'?\d+'?\s*=\s*'?\d+'?|true\b)|\/\*![0-9]*/i.test(decodedReq)) {
+    issues.push({
+      checkId: "lexical-sqli-payload",
+      title: "Structural SQL injection pattern in request",
+      severity: "high",
+      detail: at("Normalized request parameters contain structural SQLi token patterns."),
+      pocRequest: rawRequest,
+      pocResponse: rawResponse,
+      remediation: "Use parameterized prepared queries and reject structural SQL payloads.",
+    });
+  }
+  if (/<(?:script|iframe|svg|object|embed)\b[^>]*>|(?:javascript|vbscript):|on(?:error|load|click|mouseover|focus)\s*=/i.test(decodedReq.replace(/\0/g, ""))) {
+    issues.push({
+      checkId: "lexical-xss-payload",
+      title: "HTML5 XSS vector in request",
+      severity: "high",
+      detail: at("Request parameters contain executable HTML5 tag, URL scheme, or event handler vector."),
+      pocRequest: rawRequest,
+      pocResponse: rawResponse,
+      remediation: "Apply strict context-aware HTML output encoding and CSP restrictions.",
+    });
+  }
+
   return issues;
 }

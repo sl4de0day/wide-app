@@ -18,6 +18,21 @@ const AI_TOOLS = [
     },
   },
   {
+    name: "read_document",
+    category: "workspace",
+    description:
+      "Read a .docx Word document (via Wide zero-dependency ZIP/XML paragraph extractor) or text file from the project workspace with numbered lines.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Document path (.docx or text file) relative to the project root." },
+        startLine: { type: "number", description: "Optional 1-based start line." },
+        endLine: { type: "number", description: "Optional 1-based inclusive end line." },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "list_dir",
     category: "workspace",
     description:
@@ -212,6 +227,51 @@ const AI_TOOLS = [
         headers: { type: "object", description: "Optional key-value request headers." },
         body: { type: "string", description: "Optional request body." },
         insecure: { type: "boolean", description: "Allow invalid SSL certificates. Defaults to true." },
+        tlsProfile: { type: "string", enum: ["none", "chrome", "firefox", "safari"], description: "Optional browser TLS profile impersonation." },
+        allowPrivate: { type: "boolean", description: "Allow private/loopback hosts. Set false to enforce SSRF NetworkPolicy." },
+        allowCredentials: { type: "boolean", description: "Allow embedded user:pass@ credentials in URLs. Defaults to false." },
+        retries: { type: "number", description: "Optional retry count (0-4) with jitter backoff on 429/5xx or transient errors." },
+        useBreaker: { type: "boolean", description: "Enable per-host circuit breaker protection against repeated blocks." },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "crawl_target",
+    category: "security",
+    description:
+      "Crawl a web target using Wide recon spider with SSRF NetworkPolicy, PathTrie route normalization, SimHash deduplication, offline Wappalyzer technology detection, passive security header/JWT/secret auditing, and StateGraph transition mapping.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Seed HTTP or HTTPS URL to crawl." },
+        maxDepth: { type: "number", description: "Maximum link depth (default 2, max 8)." },
+        maxPages: { type: "number", description: "Maximum pages to crawl (default 40)." },
+        fieldScope: { type: "string", enum: ["rdn", "fqdn", "dn"], description: "DNS scope boundary (default rdn)." },
+        tlsProfile: { type: "string", enum: ["none", "chrome", "firefox", "safari"], description: "Browser header impersonation profile." },
+        probePaths: { type: "boolean", description: "Probe common discovery paths (/robots.txt, /sitemap.xml, /openapi.json)." },
+        allowPrivate: { type: "boolean", description: "Allow loopback/private IP targets. Set false to enforce SSRF protection." },
+        mode: { type: "string", enum: ["standard", "headless"], description: "Crawl mode (standard HTTP/Rust spider or headless Chromium)." },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "inspect_http_message",
+    category: "security",
+    description:
+      "Inspect an HTTP request/response or raw HTTP/1.x wire payload using RFC 9112 smuggling & response-poisoning conformance, %uXXXX/UTF-8 evasion decoding, lexical SQLi and HTML5 XSS tokenizers, ReDoS-safe Thompson NFA rules, and learning-mode exception draft generation.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Target HTTP URL or path." },
+        method: { type: "string", description: "HTTP method (default GET)." },
+        headers: { type: "object", description: "Optional HTTP headers map." },
+        body: { type: "string", description: "Optional HTTP request body." },
+        rawRequest: { type: "string", description: "Optional raw HTTP/1.x wire request for RFC 9112 smuggling check." },
+        rawResponse: { type: "string", description: "Optional raw HTTP/1.x wire response for poisoning check." },
+        learning: { type: "boolean", description: "Generate dated 'except ...' exception drafts for rule hits." },
+        level: { type: "number", description: "Inspection paranoia level (1 or 2, default 2)." },
       },
       required: ["url"],
     },
@@ -258,18 +318,24 @@ const AI_TOOLS = [
     name: "manage_catcher",
     category: "catcher",
     description:
-      "Control Wide Catcher intercepting proxy: status, start, stop, get_traffic, set_intercept, set_response_intercept, set_scope, clear, ca_status, ca_trust.",
+      "Control Wide Catcher intercepting proxy and recon engine: status, start, stop, get_traffic, set_intercept, set_response_intercept, set_scope, clear, ca_status, ca_trust, crawl, audit_passive.",
     parameters: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["status", "start", "stop", "get_traffic", "set_intercept", "set_response_intercept", "set_scope", "clear", "ca_status", "ca_trust"],
+          enum: ["status", "start", "stop", "get_traffic", "set_intercept", "set_response_intercept", "set_scope", "clear", "ca_status", "ca_trust", "crawl", "audit_passive", "inspect", "inspect_smuggling"],
           description: "Catcher action to perform.",
         },
         intercept: { type: "boolean", description: "Whether to intercept requests or responses." },
         scope: { type: "array", items: { type: "string" }, description: "Host/URL scope patterns for Catcher." },
         limit: { type: "number", description: "Maximum number of traffic items to return (default 20)." },
+        url: { type: "string", description: "Target URL for crawl or audit_passive actions." },
+        id: { type: "number", description: "Captured traffic ID for audit_passive." },
+        maxDepth: { type: "number", description: "Crawl depth limit (default 2)." },
+        maxPages: { type: "number", description: "Maximum pages to crawl (default 40)." },
+        fieldScope: { type: "string", enum: ["rdn", "fqdn", "dn"], description: "DNS scope mode for crawl." },
+        allowPrivate: { type: "boolean", description: "Allow private/loopback targets during crawl." },
       },
       required: ["action"],
     },
@@ -278,18 +344,23 @@ const AI_TOOLS = [
     name: "catcher_control",
     category: "catcher",
     description:
-      "Full Catcher MITM proxy lifecycle & settings control: start/stop proxy on 127.0.0.1, toggle request/response interception, set host scope filter, clear captured history, or manage MITM CA trust.",
+      "Full Catcher MITM proxy lifecycle & recon control: start/stop proxy, toggle interception, set host scope filter, clear history, manage MITM CA trust, run crawl, or run passive audit.",
     parameters: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["status", "start", "stop", "set_intercept", "set_scope", "clear", "ca_status", "ca_trust", "ca_untrust"],
+          enum: ["status", "start", "stop", "set_intercept", "set_scope", "clear", "ca_status", "ca_trust", "ca_untrust", "crawl", "audit_passive", "inspect", "inspect_smuggling"],
           description: "Control action to execute.",
         },
         intercept: { type: "boolean", description: "Enable/disable request interception." },
         interceptResponses: { type: "boolean", description: "Enable/disable response interception." },
         scope: { type: "array", items: { type: "string" }, description: "Array of host/substring scope patterns." },
+        url: { type: "string", description: "Target URL for crawl or audit_passive." },
+        id: { type: "number", description: "Traffic ID for audit_passive." },
+        maxDepth: { type: "number", description: "Crawl depth limit." },
+        maxPages: { type: "number", description: "Max pages for crawl." },
+        allowPrivate: { type: "boolean", description: "Allow private/loopback targets during crawl." },
       },
       required: ["action"],
     },
@@ -397,6 +468,8 @@ const AI_TOOLS = [
         followRedirects: { type: "boolean", description: "Follow HTTP redirects." },
         useSessionMacro: { type: "boolean", description: "Apply configured Catcher session cookie/macro." },
         insecure: { type: "boolean", description: "Allow invalid TLS certificates. Defaults to true." },
+        tlsProfile: { type: "string", enum: ["none", "chrome", "firefox", "safari"], description: "Optional TLS impersonation profile." },
+        allowPrivate: { type: "boolean", description: "Allow private/loopback targets. Set false to enforce SSRF policy." },
         openUi: { type: "boolean", description: "Open request in Catcher Repeater UI." },
       },
       required: ["url"],
@@ -520,6 +593,7 @@ const AI_TOOLS = [
         clearSession: { type: "boolean", description: "Reset cookies/storage before opening." },
         bypassProxy: { type: "boolean", description: "Bypass Catcher proxy even if running." },
         stealth: { type: "boolean", description: "Opt-in stealth evasion mode masking navigator.webdriver and headless signals." },
+        fastRead: { type: "boolean", description: "Block images, fonts, media, stylesheets, and analytics trackers for fast article reading." },
       },
       required: [],
     },
@@ -534,6 +608,7 @@ const AI_TOOLS = [
       properties: {
         url: { type: "string", description: "Target http or https URL to navigate to." },
         waitUntil: { type: "string", enum: ["load", "domcontentloaded", "networkidle"], description: "Load state to wait for." },
+        fastRead: { type: "boolean", description: "Toggle fastRead resource blocking (images/fonts/CSS/trackers) for navigation." },
       },
       required: ["url"],
     },
@@ -667,16 +742,17 @@ const AI_TOOLS = [
     name: "browser_extract",
     category: "browser",
     description:
-      "Extract snapshot, visible text, links, inputs, DOM tree, HTML, cookies, or storage from the active page.",
+      "Extract snapshot, clean article metadata/body (article/clean_text), visible text, links, inputs, DOM tree, HTML, cookies, storage, js_endpoints, secrets, xhr, or state_graph from the active page.",
     parameters: {
       type: "object",
       properties: {
         selector: { type: "string", description: "Optional CSS selector to scope extraction." },
         mode: {
           type: "string",
-          enum: ["snapshot", "text", "dom_tree", "links", "inputs", "html", "cookies", "storage"],
-          description: "Extraction mode. Defaults to snapshot.",
+          enum: ["snapshot", "text", "article", "clean_text", "dom_tree", "links", "inputs", "html", "cookies", "storage", "js_endpoints", "secrets", "xhr", "state_graph"],
+          description: "Extraction mode. Use 'article' or 'clean_text' for stripped main content without nav/footer noise. Defaults to snapshot.",
         },
+        cleanText: { type: "boolean", description: "Extract clean article text even when combined with other options." },
       },
       required: [],
     },
@@ -1070,130 +1146,67 @@ const AI_WRITE_TOOLS = new Set([
   "run_tests",
 ]);
 
-const AI_TOOL_NAME_ALIASES = {
-  create_file: "write_file",
-  save_file: "write_file",
-  write_to_file: "write_file",
-  overwrite_file: "write_file",
-  new_file: "write_file",
-  write: "write_file",
-  modify_file: "edit_file",
-  update_file: "edit_file",
-  replace_in_file: "edit_file",
-  str_replace: "edit_file",
-  str_replace_editor: "edit_file",
-  patch_file: "edit_file",
-  edit: "edit_file",
-  view_file: "read_file",
-  cat: "read_file",
-  get_file: "read_file",
-  read: "read_file",
-  list_files: "list_dir",
-  ls: "list_dir",
-  list: "list_dir",
-  dir: "list_dir",
-  list_directory: "list_dir",
-  grep: "search",
-  glob: "search",
-  search_files: "search",
-  find_in_files: "search",
-  bash: "run_command",
-  sh: "run_command",
-  shell: "run_command",
-  exec: "run_command",
-  execute: "run_command",
-  execute_command: "run_command",
-  terminal: "run_command",
-  cmd: "run_command",
-  mkdir: "create_dir",
-  make_dir: "create_dir",
-  create_directory: "create_dir",
-  rm: "delete_file",
-  remove_file: "delete_file",
-  unlink: "delete_file",
-  open_tool: "open_tool_tab",
-  open_tab: "open_tool_tab",
-  switch_tab: "open_tool_tab",
-  navigate_tool: "open_tool_tab",
-  diagnostics: "get_diagnostics",
-  check_diagnostics: "get_diagnostics",
-  problems: "get_diagnostics",
-  check_errors: "get_diagnostics",
-  transform: "transform_data",
-  decode: "transform_data",
-  encode: "transform_data",
-  jwt: "transform_data",
-  hash: "transform_data",
-  http_request: "send_http_request",
-  http: "send_http_request",
-  send_to_pitcher: "pitcher_send",
-  send_request: "send_http_request",
-  request: "send_http_request",
-  fetch: "send_http_request",
-  curl: "send_http_request",
-  oast: "oast_control",
-  vault_list: "vault_list_refs",
-  list_findings: "findings_query",
-  lsp: "lsp_navigate",
-  debug: "debug_control",
-  test_run: "run_tests",
-  ui_state: "ui_state_get",
-  get_ui_state: "ui_state_get",
-  security_scan: "run_security_scan",
-  sec_scan: "run_security_scan",
-  scan_security: "run_security_scan",
-  scan_project: "run_security_scan",
-  vuln_scan: "run_security_scan",
-  audit_dependencies: "check_dependencies",
-  audit_deps: "check_dependencies",
-  osv_scan: "check_dependencies",
-  check_cve: "check_dependencies",
-  cve_audit: "check_dependencies",
-  list_open_tabs: "get_open_tabs",
-  open_tabs: "get_open_tabs",
-  get_tabs: "get_open_tabs",
-  active_tabs: "get_open_tabs",
-  catcher: "manage_catcher",
-  catcher_proxy: "manage_catcher",
-  proxy_control: "catcher_control",
-  control_proxy: "catcher_control",
-  get_proxy_traffic: "catcher_traffic_query",
-  proxy_traffic: "catcher_traffic_query",
-  catcher_traffic: "catcher_traffic_query",
-  start_proxy: "catcher_control",
-  stop_proxy: "catcher_control",
-  proxy_status: "catcher_control",
-  catcher_status: "catcher_control",
-  open_browser: "browser_open",
-  launch_browser: "browser_open",
-  start_browser: "browser_open",
-  navigate: "browser_navigate",
-  goto: "browser_navigate",
-  browse: "browser_navigate",
-  snapshot: "browser_snapshot",
-  page_snapshot: "browser_snapshot",
-  click: "browser_click",
-  click_element: "browser_click",
-  type: "browser_type",
-  type_text: "browser_type",
-  fill: "browser_type",
-  fill_input: "browser_type",
-  press: "browser_press",
-  press_key: "browser_press",
-  hover: "browser_hover",
-  select_option: "browser_select",
-  scroll: "browser_scroll",
-  wait_for: "browser_wait",
-  extract: "browser_extract",
-  extract_text: "browser_extract",
-  browser_logs: "browser_console",
-  cookies: "browser_cookies",
-  screenshot: "browser_screenshot",
-  capture_screen: "browser_screenshot",
-  close_browser: "browser_close",
-};
+const AI_SECURITY_TOOLS = new Set([
+  "transform_data",
+  "send_http_request",
+  "run_security_scan",
+  "check_dependencies",
+  "crawl_target",
+  "inspect_http_message",
+  "manage_catcher",
+  "catcher_control",
+  "catcher_traffic_query",
+  "catcher_intercept_decide",
+  "catcher_match_replace",
+  "catcher_send_to_repeater",
+  "repeater_send",
+  "catcher_send_to_intruder",
+  "intruder_attack",
+  "catcher_ws_send",
+  "decision_score",
+  "decision_consensus",
+  "decision_claim",
+  "pitcher_send",
+  "pitcher_env",
+  "oast_control",
+  "oast_poll",
+  "vault_list_refs",
+  "findings_query",
+  "findings_baseline",
+]);
 
-const AI_KNOWN_TOOL_NAMES = new Set(AI_TOOLS.map((t) => t.name));
+const AI_CODE_ONLY_TOOLS = new Set([
+  "write_file",
+  "edit_file",
+  "create_dir",
+  "delete_file",
+  "git",
+  "get_diagnostics",
+  "engine_control",
+  "lsp_navigate",
+  "debug_control",
+  "wide_custom_tool_run",
+  "run_tests",
+]);
+
+function aiNormalizeToolMode(mode) {
+  return __wideTs.aiNormalizeToolMode(mode);
+}
+
+function aiIsToolAllowedInContext(tool, opts = {}) {
+  return __wideTs.aiIsToolAllowedInContext(tool, opts);
+}
+
+function aiFilterTools(opts = {}) {
+  return __wideTs.aiFilterToolsFromSpecs(AI_TOOLS, opts);
+}
+
+function aiValidateToolCall(rawName, rawInput, opts = {}) {
+  return __wideTs.aiValidateToolCallFromSpecs(AI_TOOLS, rawName, rawInput, {
+    ...opts,
+    isMcpTool: typeof isMcpTool === "function" ? isMcpTool : undefined,
+  });
+}
 
 const AI_DESTRUCTIVE_COMMAND_PATTERNS = [
   { pattern: /\brm\s+-[a-zA-Z]*[rf][a-zA-Z]*\s+(?:\/|~|\$HOME|\.\.|[A-Za-z]:\\)/i, reason: "Recursive deletion targeting root, home, or parent path" },
@@ -1217,8 +1230,8 @@ function aiAssessCommandRisk(command) {
   return { destructive: false, reason: "" };
 }
 
-function aiGetToolCatalog(allowWrites = true) {
-  const own = allowWrites ? AI_TOOLS : AI_TOOLS.filter((tool) => !AI_WRITE_TOOLS.has(tool.name));
+function aiGetToolCatalog(optsOrAllowWrites = true) {
+  const own = aiFilterTools(optsOrAllowWrites);
   const extra = typeof mcpToolSpecs === "function" ? mcpToolSpecs() : [];
   return [...own, ...extra].map((tool) => ({
     name: tool.name,

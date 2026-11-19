@@ -1,13 +1,82 @@
-import { bridge } from "@/lib/bridge";
+import { bridge, type ReconCrawlEvent } from "@/lib/bridge";
 import { parseHttpMessage } from "@/lib/httpMessage";
 
 export interface CrawlOptions {
   maxPages?: number;
   maxDepth?: number;
+  mode?: "standard" | "headless" | "hybrid";
+  fieldScope?: "rdn" | "fqdn" | "dn";
+  robotsAndSitemap?: boolean;
+  probePaths?: boolean;
+  filterSimilar?: boolean;
+  allowPrivate?: boolean;
   signal?: { cancelled: boolean };
   onFound?: (requestText: string, url: string) => void;
   onProgress?: (visited: number, queued: number) => void;
   sessionHeaders?: [string, string][];
+}
+
+interface TrieNode {
+  children: Map<string, TrieNode>;
+  paramChild: TrieNode | null;
+  promoted: boolean;
+}
+
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const HEX24_RE = /^[0-9a-fA-F]{24,}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const NUM_RE = /^-?\d+$/;
+
+function normalizeDynamicSeg(seg: string): string {
+  if (UUID_RE.test(seg)) return "{uuid}";
+  if (DATE_RE.test(seg)) return "{date}";
+  if (NUM_RE.test(seg)) return "{num}";
+  if (HEX24_RE.test(seg) && /[a-fA-F]/.test(seg) && /\d/.test(seg)) return "{hex}";
+  return seg;
+}
+
+export class ClientPathTrie {
+  private readonly roots = new Map<string, TrieNode>();
+  private readonly threshold: number;
+
+  constructor(threshold = 10) {
+    this.threshold = Math.max(2, threshold);
+  }
+
+  collapse(host: string, segments: string[]): string[] {
+    let root = this.roots.get(host);
+    if (!root) {
+      root = { children: new Map(), paramChild: null, promoted: false };
+      this.roots.set(host, root);
+    }
+    const out: string[] = [];
+    let node: TrieNode = root;
+    for (const rawSeg of segments) {
+      const seg = normalizeDynamicSeg(rawSeg);
+      if (node.promoted) {
+        out.push("{param}");
+        if (!node.paramChild) node.paramChild = { children: new Map(), paramChild: null, promoted: false };
+        node = node.paramChild;
+        continue;
+      }
+      let next = node.children.get(seg);
+      if (!next) {
+        next = { children: new Map(), paramChild: null, promoted: false };
+        node.children.set(seg, next);
+        if (node.children.size > this.threshold) {
+          node.promoted = true;
+          node.children.clear();
+          node.paramChild = { children: new Map(), paramChild: null, promoted: false };
+          out.push("{param}");
+          node = node.paramChild;
+          continue;
+        }
+      }
+      out.push(seg);
+      node = next;
+    }
+    return out;
+  }
 }
 
 function mergeSession(headers: [string, string][], session: [string, string][]): [string, string][] {
@@ -105,10 +174,58 @@ export async function crawl(seedUrl: string, opts: CrawlOptions = {}): Promise<s
   const maxPages = opts.maxPages ?? 60;
   const maxDepth = opts.maxDepth ?? 3;
   let seedHost = "";
+  let parsedSeed: URL;
   try {
-    seedHost = new URL(seedUrl).host;
+    parsedSeed = new URL(seedUrl);
+    seedHost = parsedSeed.host;
   } catch {
     return [];
+  }
+
+  if (typeof bridge.reconCrawlStart === "function" && typeof bridge.onReconEvent === "function") {
+    const backendFound: string[] = [];
+    const seenReqs = new Set<string>();
+    const emitBackend = (text: string, u: string) => {
+      if (seenReqs.has(text)) return;
+      seenReqs.add(text);
+      backendFound.push(text);
+      opts.onFound?.(text, u);
+    };
+    const isPrivateSeed = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\])/i.test(parsedSeed.hostname);
+    const unsub = bridge.onReconEvent((ev: ReconCrawlEvent) => {
+      if (opts.signal?.cancelled) return;
+      if (ev.type === "progress") {
+        opts.onProgress?.(ev.visited ?? 0, ev.queued ?? 0);
+      } else if (ev.type === "page" && ev.page) {
+        const pageUrl = ev.page.finalUrl || ev.page.url;
+        emitBackend(getRequestText(pageUrl), pageUrl);
+        for (const l of ev.page.links || []) {
+          emitBackend(getRequestText(l), l);
+        }
+        for (const f of ev.page.forms || []) {
+          const body = (f.fields || []).map((fld) => `${encodeURIComponent(fld.name)}=test`).join("&");
+          emitBackend(formRequestText(f.action, (f.method || "GET").toUpperCase(), body), f.action);
+        }
+      }
+    });
+    try {
+      const res = await bridge.reconCrawlStart({
+        seeds: [seedUrl],
+        mode: opts.mode ?? "standard",
+        maxDepth,
+        maxPages,
+        fieldScope: opts.fieldScope ?? "rdn",
+        robotsAndSitemap: opts.robotsAndSitemap ?? true,
+        probePaths: opts.probePaths ?? true,
+        filterSimilar: opts.filterSimilar ?? true,
+        allowPrivate: opts.allowPrivate ?? isPrivateSeed,
+        headers: opts.sessionHeaders ?? [],
+      });
+      unsub();
+      if (res.ok) return backendFound;
+    } catch {
+      unsub();
+    }
   }
 
   const visited = new Set<string>();

@@ -345,8 +345,8 @@ function debugBrowserTarget(port) {
             try {
               const list = JSON.parse(body);
               target = list.find((item) => item.type === "page" && item.webSocketDebuggerUrl) || list[0];
-            } catch {
-
+            } catch (error) {
+              reportRecoverableError("debug", "parse CDP debug target list failed", error);
             }
             if (target && target.webSocketDebuggerUrl) resolve(target.webSocketDebuggerUrl);
             else if (tries < 15) setTimeout(attempt, 400);
@@ -371,8 +371,8 @@ async function debugAttachBrowser(event, breakpoints, root) {
     port = await debugFreePort();
     try {
       await electron.hostRequest("browser:debug", { port });
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("debug", "host browser:debug request failed", error);
     }
     browserRemotePort = port;
   }

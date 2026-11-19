@@ -71,9 +71,26 @@ for (const part of parts) {
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.cpSync(RUNTIME, path.dirname(OUT), { recursive: true });
-fs.writeFileSync(OUT, `${parts.map((p) => p.code).join('\n')}\n`, 'utf8');
 
 const esbuild = require('esbuild');
+const tsEntry = path.join(SRC, 'ts', 'index.ts');
+let tsPrefix = '';
+if (fs.existsSync(tsEntry)) {
+  esbuild.buildSync({
+    entryPoints: [tsEntry],
+    outfile: path.join(path.dirname(OUT), 'backend-modules.cjs'),
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'cjs',
+    external: ['electron', 'node:*', '@lydell/node-pty', 'playwright-core', 'node-forge', 'prettier', 'typescript', '@grpc/grpc-js', '@grpc/proto-loader', 'mysql2', 'pg', 'ioredis'],
+    logLevel: 'silent',
+  });
+  tsPrefix = "const __wideTs = require('./backend-modules.cjs');\n";
+}
+
+fs.writeFileSync(OUT, `${tsPrefix}${parts.map((p) => p.code).join('\n')}\n`, 'utf8');
+
 const rootDir = path.resolve(__dirname, '..', '..');
 const aiVendorEntry = path.join(__dirname, 'vendor', 'ai-vendor.mjs');
 const mcpVendorEntry = path.join(__dirname, 'vendor', 'mcp-vendor.mjs');

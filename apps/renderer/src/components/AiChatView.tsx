@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Code2,
   Copy,
   Download,
   ExternalLink,
@@ -14,6 +15,8 @@ import {
   FolderOpen,
   Globe,
   ImagePlus,
+  Layers,
+  MessageSquare,
   Mic,
   MicOff,
   Pencil,
@@ -36,7 +39,7 @@ import { highlightCode } from "@lezer/highlight";
 import { ModelPicker, useModelLabel } from "@/components/ai/ModelPicker";
 import { codeHighlight, editorTheme } from "@/editor/theme";
 import { languageFor } from "@/editor/languages";
-import { bridge } from "@/lib/bridge";
+import { bridge, type AiClaudeEffort, type AiToolMode } from "@/lib/bridge";
 import { splitChatSegments, renderProse } from "@/lib/chatMarkdown";
 import { exportConversation } from "@/lib/chatExport";
 import { useT } from "@/lib/i18n";
@@ -114,9 +117,24 @@ function resolvePath(root: string, path: string): string {
 function stepTarget(step: AiToolStep): string {
   const input = step.input as {
     path?: string;
+    Path?: string;
+    file_path?: string;
+    filePath?: string;
+    TargetFile?: string;
+    target_file?: string;
+    AbsolutePath?: string;
+    absolute_path?: string;
     file?: string;
     query?: string;
+    Query?: string;
+    pattern?: string;
+    Pattern?: string;
+    DirectoryPath?: string;
+    SearchDirectory?: string;
     command?: string;
+    CommandLine?: string;
+    description?: string;
+    subagent_type?: string;
     tab?: string;
     operation?: string;
     url?: string;
@@ -130,6 +148,9 @@ function stepTarget(step: AiToolStep): string {
     id?: string;
     toolId?: string;
   } | null;
+  if (step.name === "Agent" || step.name === "Task") {
+    return String(input?.description || input?.subagent_type || "Subagent");
+  }
   if (step.name.startsWith("browser_")) {
     const labelMap: Record<string, string> = {
       browser_open: "Browser: Open",
@@ -179,10 +200,50 @@ function stepTarget(step: AiToolStep): string {
     const suffix = input.path || input.file || input.key || input.toolId || input.id || "";
     return suffix ? `${step.name}: ${input.action} (${suffix})` : `${step.name}: ${input.action}`;
   }
-  return String(input?.manifest ?? input?.path ?? input?.file ?? input?.tab ?? input?.operation ?? input?.query ?? input?.command ?? "");
+  if (step.name === "fileChange") {
+    const ch = (step.input as { changes?: Array<{ path?: string }> } | null)?.changes?.[0]?.path;
+    if (ch) return String(ch);
+  }
+  return String(
+    input?.manifest ??
+      input?.TargetFile ??
+      input?.target_file ??
+      input?.AbsolutePath ??
+      input?.absolute_path ??
+      input?.Path ??
+      input?.file_path ??
+      input?.filePath ??
+      input?.path ??
+      input?.file ??
+      input?.tab ??
+      input?.operation ??
+      input?.pattern ??
+      input?.Pattern ??
+      input?.query ??
+      input?.Query ??
+      input?.DirectoryPath ??
+      input?.SearchDirectory ??
+      input?.command ??
+      input?.CommandLine ??
+      "",
+  );
 }
 
-const OPENS_A_FILE = new Set(["read_file", "open_file", "write_file", "edit_file"]);
+const OPENS_A_FILE = new Set([
+  "read_file",
+  "open_file",
+  "view_file",
+  "write_file",
+  "edit_file",
+  "write_to_file",
+  "replace_file_content",
+  "multi_replace_file_content",
+  "Read",
+  "Write",
+  "Edit",
+  "MultiEdit",
+  "fileChange",
+]);
 
 function normalizeLangToExt(lang: string): string {
   const l = (lang || "").trim().toLowerCase();
@@ -900,11 +961,14 @@ function DiffSlidePanel({
 
 function extractLineRange(step: AiToolStep, rawTarget: string): string {
   const input = (step.input && typeof step.input === "object" ? step.input : {}) as Record<string, unknown>;
-  const start = input.StartLine ?? input.start_line ?? input.start ?? input.fromLine ?? input.from;
+  const start = input.StartLine ?? input.start_line ?? input.start ?? input.fromLine ?? input.from ?? input.offset;
   const end = input.EndLine ?? input.end_line ?? input.end ?? input.toLine ?? input.to;
   const single = input.line ?? input.Line ?? input.lineNumber;
   if (start !== undefined && end !== undefined) {
     return `#L${start}-${end}`;
+  }
+  if (start !== undefined && input.offset !== undefined && typeof input.limit === "number") {
+    return `#L${start}-${Number(start) + input.limit - 1}`;
   }
   if (start !== undefined) {
     return `#L${start}`;
@@ -924,6 +988,8 @@ function extractCommandInfo(step: AiToolStep): { commandText: string; exitCode: 
   let commandText = "";
   if (typeof input.toolSummary === "string" && input.toolSummary.trim()) {
     commandText = input.toolSummary.trim();
+  } else if (typeof input.description === "string" && input.description.trim() && typeof input.command === "string") {
+    commandText = `${input.description.trim()}: ${input.command.trim()}`;
   } else if (typeof input.command === "string" && input.command.trim()) {
     commandText = input.command.trim();
   } else if (typeof input.CommandLine === "string" && input.CommandLine.trim()) {
@@ -984,10 +1050,10 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
     let actionLabel = step.name;
     let actionKind: "edited" | "created" | "analyzed" | "command" | "other" = "other";
 
-    if (step.name === "read_file" || step.name === "open_file") {
+    if (step.name === "read_file" || step.name === "open_file" || step.name === "view_file" || step.name === "Read") {
       actionLabel = t("Analyzed");
       actionKind = "analyzed";
-    } else if (step.name === "write_file") {
+    } else if (step.name === "write_file" || step.name === "write_to_file" || step.name === "Write" || step.name === "fileChange") {
       if (step.existed === false) {
         actionLabel = t("Created");
         actionKind = "created";
@@ -995,11 +1061,19 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
         actionLabel = t("Edited");
         actionKind = "edited";
       }
-    } else if (step.name === "edit_file") {
+    } else if (
+      step.name === "edit_file" ||
+      step.name === "replace_file_content" ||
+      step.name === "multi_replace_file_content" ||
+      step.name === "Edit" ||
+      step.name === "MultiEdit"
+    ) {
       actionLabel = t("Edited");
       actionKind = "edited";
     } else if (
       step.name === "run_command" ||
+      step.name === "Bash" ||
+      step.name === "commandExecution" ||
       step.name === "git" ||
       step.name === "send_http_request" ||
       step.name === "pitcher_send" ||
@@ -1016,7 +1090,16 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
     ) {
       actionLabel = t("Ran");
       actionKind = "command";
-    } else if (step.name === "search" || step.name === "find_relevant" || step.name === "lsp_navigate") {
+    } else if (
+      step.name === "search" ||
+      step.name === "grep_search" ||
+      step.name === "find_by_name" ||
+      step.name === "find_relevant" ||
+      step.name === "lsp_navigate" ||
+      step.name === "Grep" ||
+      step.name === "Glob" ||
+      step.name === "WebSearch"
+    ) {
       actionLabel = t("Searched");
     } else if (
       step.name === "list_dir" ||
@@ -1025,7 +1108,11 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
       step.name === "get_open_tabs" ||
       step.name === "ui_state_get" ||
       step.name === "vault_list_refs" ||
-      step.name === "pitcher_env"
+      step.name === "pitcher_env" ||
+      step.name === "Agent" ||
+      step.name === "Task" ||
+      step.name === "WebFetch" ||
+      step.name === "TodoWrite"
     ) {
       actionLabel = t("Explored");
     } else if (
@@ -1053,8 +1140,20 @@ function enrichSteps(steps: AiToolStep[], root: string, t: ReturnType<typeof use
         removed = counts.removed;
       } else if (step.input) {
         const input = step.input as Record<string, unknown>;
-        const find = typeof input.find === "string" ? input.find : (typeof input.old_str === "string" ? input.old_str : "");
-        const replace = typeof input.replace === "string" ? input.replace : (typeof input.new_str === "string" ? input.new_str : "");
+        const find = typeof input.find === "string"
+          ? input.find
+          : typeof input.old_string === "string"
+            ? input.old_string
+            : typeof input.old_str === "string"
+              ? input.old_str
+              : "";
+        const replace = typeof input.replace === "string"
+          ? input.replace
+          : typeof input.new_string === "string"
+            ? input.new_string
+            : typeof input.new_str === "string"
+              ? input.new_str
+              : "";
         if (find || replace) {
           const counts = diffCounts(lineDiff(find, replace));
           added = counts.added;
@@ -1283,6 +1382,32 @@ function AgentProcessStream({
                       )}
                     >
                       {item.httpStatus}
+                    </span>
+                  )}
+
+                  {item.step.staged && (
+                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-300 shrink-0 select-none">
+                      {t("Staged")}
+                    </span>
+                  )}
+
+                  {item.step.verification && (
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 font-mono text-[10px] font-medium shrink-0 select-none",
+                        item.step.verification.errors > 0
+                          ? "bg-rose-500/15 text-rose-400"
+                          : item.step.verification.warnings > 0
+                            ? "bg-amber-500/15 text-amber-300"
+                            : "bg-emerald-500/15 text-emerald-400",
+                      )}
+                      title={item.step.verification.diagnostics?.map((d) => `L${d.line}: ${d.message}`).join("\n") || ""}
+                    >
+                      {item.step.verification.errors > 0
+                        ? t("{count} errors", { count: item.step.verification.errors })
+                        : item.step.verification.warnings > 0
+                          ? t("{count} warnings", { count: item.step.verification.warnings })
+                          : t("0 errors")}
                     </span>
                   )}
 
@@ -1553,8 +1678,21 @@ const Turn = memo(function Turn({
               )
             )}
             {turn.usage && turn.usage.total > 0 && (
-              <span className="rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-fg-faint border border-line/50">
+              <span
+                title={
+                  [
+                    `In: ${tokens(turn.usage.input)}`,
+                    `Out: ${tokens(turn.usage.output)}`,
+                    turn.usage.cacheRead ? `Cache: ${tokens(turn.usage.cacheRead)}` : "",
+                    typeof turn.usage.costUsd === "number" && turn.usage.costUsd > 0 ? `$${turn.usage.costUsd.toFixed(4)}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                }
+                className="rounded-full bg-panel px-2.5 py-0.5 text-[10px] text-fg-faint border border-line/50"
+              >
                 {t("{count} tokens", { count: tokens(turn.usage.total) })}
+                {typeof turn.usage.costUsd === "number" && turn.usage.costUsd > 0 ? ` · $${turn.usage.costUsd.toFixed(3)}` : ""}
               </span>
             )}
           </div>
@@ -1568,9 +1706,29 @@ const Turn = memo(function Turn({
       )}
 
       {turn.error && (
-        <div className="flex items-center gap-2 rounded-lg border border-status-error/30 bg-status-error/10 p-3 text-[12px] text-status-error">
-          <AlertCircle className="size-4 shrink-0" />
-          <span>{t(turn.error)}</span>
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-status-error/30 bg-status-error/10 p-3 text-[12px] text-status-error">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle className="size-4 shrink-0" />
+            <span>{t(turn.error)}</span>
+          </div>
+          {turn.errorKind === "auth" && (
+            <button
+              type="button"
+              onClick={() => {
+                const activeProvider = useAi.getState().config?.provider;
+                if (activeProvider === "antigravity") {
+                  void bridge.aiAntigravityLogin();
+                } else if (activeProvider === "codex") {
+                  void bridge.aiCodexLogin();
+                } else {
+                  void bridge.aiClaudeCodeLogin();
+                }
+              }}
+              className="shrink-0 rounded-md border border-status-error/40 bg-panel px-2.5 py-1 text-[11px] font-medium text-fg hover:bg-hover transition-colors"
+            >
+              {t("Sign in")}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1839,18 +1997,257 @@ function PermissionBanner({ sessionId, activeTurn }: { sessionId: string; active
   );
 }
 
-const EFFORT_OPTIONS: { value: "fast" | "thinking"; label: string; desc: string }[] = [
-  { value: "fast", label: "Fast", desc: "Quick, concise answers" },
-  { value: "thinking", label: "Thinking", desc: "Deep, thorough analysis" },
+const TOOL_MODE_OPTIONS: { value: AiToolMode; label: string; desc: string }[] = [
+  { value: "full", label: "Full", desc: "All coding, security, and analysis tools" },
+  { value: "code", label: "Code", desc: "Workspace, LSP, lint, tests, and terminal" },
+  { value: "security", label: "Security", desc: "Catcher, OAST, HTTP, and vulnerability audits" },
 ];
+
+function ToolModeIcon({ mode, className }: { mode: AiToolMode; className?: string }) {
+  if (mode === "code") return <Code2 className={className} strokeWidth={2} />;
+  if (mode === "security") return <Shield className={className} strokeWidth={2} />;
+  return <Layers className={className} strokeWidth={2} />;
+}
+
+function ToolModeToggle() {
+  const t = useT();
+  const toolMode = useAi((state) => state.toolMode);
+  const setToolMode = useAi((state) => state.setToolMode);
+  const [open, setOpen] = useState(false);
+  const current = TOOL_MODE_OPTIONS.find((o) => o.value === toolMode) ?? TOOL_MODE_OPTIONS[0];
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={t("Assistant tool scope")}
+        aria-label={t("Assistant tool scope")}
+        className={cn(
+          "flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] font-medium text-fg-dim transition-colors hover:bg-hover hover:text-fg",
+          open && "bg-hover text-fg",
+        )}
+      >
+        <ToolModeIcon mode={current.value} className="size-3.5 text-fg-dim shrink-0" />
+        <span>{t(current.label)}</span>
+        <ChevronDown className={cn("size-3 shrink-0 opacity-60 transition-transform", open && "rotate-180")} strokeWidth={2} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="wide-pop-up absolute bottom-full left-0 z-50 mb-2 w-60 overflow-hidden rounded-xl border border-line bg-panel p-1 shadow-2xl">
+            {TOOL_MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  void setToolMode(opt.value);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover",
+                  toolMode === opt.value ? "bg-hover text-fg" : "text-fg-dim",
+                )}
+              >
+                <ToolModeIcon mode={opt.value} className="mt-0.5 size-3.5 text-fg-dim shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium">{t(opt.label)}</div>
+                  <div className="text-[10px] text-fg-faint">{t(opt.desc)}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function InteractionModeToggle() {
+  const t = useT();
+  const interactionMode = useAi((state) => state.interactionMode);
+  const setInteractionMode = useAi((state) => state.setInteractionMode);
+
+  return (
+    <div
+      className="flex items-center rounded-lg border border-line/60 bg-canvas/50 p-0.5 text-[11px]"
+      role="group"
+      aria-label={t("Execution mode")}
+    >
+      <button
+        type="button"
+        onClick={() => void setInteractionMode("agent")}
+        title={t("Agent mode: can edit files and run commands")}
+        className={cn(
+          "flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium transition-colors",
+          interactionMode === "agent" ? "bg-panel text-fg shadow-sm" : "text-fg-faint hover:text-fg",
+        )}
+      >
+        <Terminal className="size-3 shrink-0" strokeWidth={2} />
+        <span>{t("Agent")}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => void setInteractionMode("ask")}
+        title={t("Ask mode: read-only analysis without writes")}
+        className={cn(
+          "flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium transition-colors",
+          interactionMode === "ask" ? "bg-panel text-fg shadow-sm" : "text-fg-faint hover:text-fg",
+        )}
+      >
+        <MessageSquare className="size-3 shrink-0" strokeWidth={2} />
+        <span>{t("Ask")}</span>
+      </button>
+    </div>
+  );
+}
+
+function BrowserToggle() {
+  const t = useT();
+  const allowBrowser = useAi((state) => state.allowBrowser);
+  const setAllowBrowser = useAi((state) => state.setAllowBrowser);
+
+  return (
+    <button
+      type="button"
+      onClick={() => void setAllowBrowser(!allowBrowser)}
+      title={allowBrowser ? t("Browser tools enabled") : t("Browser tools disabled")}
+      aria-pressed={allowBrowser}
+      className={cn(
+        "flex items-center gap-1 rounded-lg px-2 py-1 text-[11.5px] font-medium transition-colors",
+        allowBrowser
+          ? "bg-accent/15 text-accent hover:bg-accent/25"
+          : "text-fg-faint hover:bg-hover hover:text-fg",
+      )}
+    >
+      <Globe className="size-3.5 shrink-0" strokeWidth={2} />
+      <span>{t("Browser")}</span>
+    </button>
+  );
+}
+
+interface EffortOptionItem {
+  value: string;
+  label: string;
+  desc: string;
+  translateDesc?: boolean;
+}
+
+const EFFORT_OPTIONS: EffortOptionItem[] = [
+  { value: "fast", label: "Fast", desc: "Quick, concise answers", translateDesc: true },
+  { value: "thinking", label: "Thinking", desc: "Deep, thorough analysis", translateDesc: true },
+];
+
+const CLAUDE_EFFORT_OPTIONS: EffortOptionItem[] = [
+  { value: "low", label: "Low", desc: "Minimal reasoning for quick tasks", translateDesc: true },
+  { value: "medium", label: "Medium", desc: "Balanced speed and depth", translateDesc: true },
+  { value: "high", label: "High", desc: "Thorough multi-step reasoning", translateDesc: true },
+  { value: "xhigh", label: "Extra High", desc: "Deep analysis for hard bugs", translateDesc: true },
+  { value: "max", label: "Max", desc: "Maximum thinking budget", translateDesc: true },
+];
+
+const EFFORT_META: Record<string, { label: string; desc: string }> = {
+  minimal: { label: "Minimal", desc: "Fastest light reasoning" },
+  low: { label: "Low", desc: "Minimal reasoning for quick tasks" },
+  medium: { label: "Medium", desc: "Balanced speed and depth" },
+  high: { label: "High", desc: "Thorough multi-step reasoning" },
+  xhigh: { label: "Extra High", desc: "Deep analysis for hard bugs" },
+  max: { label: "Max", desc: "Maximum thinking budget" },
+  ultra: { label: "Ultra", desc: "Ultra deep extended reasoning" },
+};
+
+const ANTIGRAVITY_VARIANT_ORDER: readonly AiClaudeEffort[] = ["low", "medium", "high", "xhigh"];
+const DEFAULT_CODEX_EFFORT_ORDER = ["low", "medium", "high", "xhigh"];
 
 function EffortToggle() {
   const t = useT();
+  const config = useAi((state) => state.config);
   const effort = useAi((state) => state.effort);
   const setEffort = useAi((state) => state.setEffort);
+  const claudeEffort = useAi((state) => state.claudeEffort);
+  const setClaudeEffort = useAi((state) => state.setClaudeEffort);
+  const antigravityEffort = useAi((state) => state.antigravityEffort);
+  const setAntigravityEffort = useAi((state) => state.setAntigravityEffort);
+  const codexEffort = useAi((state) => state.codexEffort);
+  const setCodexEffort = useAi((state) => state.setCodexEffort);
+  const antigravityModels = useAi((state) => state.antigravityModels);
+  const codexModels = useAi((state) => state.codexModels);
   const [open, setOpen] = useState(false);
 
-  const current = EFFORT_OPTIONS.find((o) => o.value === effort) ?? EFFORT_OPTIONS[0];
+  const isClaudeCode = config?.tab !== "local" && config?.provider === "claude-code";
+  const isAntigravity = config?.tab !== "local" && config?.provider === "antigravity";
+  const isCodex = config?.tab !== "local" && config?.provider === "codex";
+
+  useEffect(() => {
+    if (isAntigravity && antigravityModels.length === 0) {
+      void bridge.aiAntigravityModels().then((res) => {
+        if (res.ok && Array.isArray(res.models) && res.models.length > 0) {
+          useAi.getState().setAntigravityModels(res.models);
+        }
+      });
+    }
+    if (isCodex && codexModels.length === 0) {
+      void bridge.aiCodexModels().then((res) => {
+        if (res.ok && Array.isArray(res.models) && res.models.length > 0) {
+          useAi.getState().setCodexModels(res.models);
+        }
+      });
+    }
+  }, [isAntigravity, isCodex, antigravityModels.length, codexModels.length]);
+
+  let options: EffortOptionItem[];
+  let activeValue: string;
+
+  if (isClaudeCode) {
+    options = CLAUDE_EFFORT_OPTIONS;
+    activeValue = claudeEffort;
+  } else if (isAntigravity) {
+    const chosenFamily = (config?.cloudModel?.antigravity ?? "").trim();
+    const matched = chosenFamily ? antigravityModels.find((m) => m.id === chosenFamily) : undefined;
+    const keys = matched?.variants ? ANTIGRAVITY_VARIANT_ORDER.filter((k) => Boolean(matched.variants[k])) : [];
+    const effectiveKeys = keys.length > 0 ? keys : ANTIGRAVITY_VARIANT_ORDER;
+    options = effectiveKeys.map((val) => ({
+      value: val,
+      label: EFFORT_META[val]?.label ?? val,
+      desc: EFFORT_META[val]?.desc ?? "",
+      translateDesc: true,
+    }));
+    activeValue = options.some((o) => o.value === antigravityEffort) ? antigravityEffort : (options[options.length - 1]?.value ?? options[0].value);
+  } else if (isCodex) {
+    const chosenCodex = (config?.cloudModel?.codex ?? "").trim();
+    const matched =
+      (chosenCodex ? codexModels.find((m) => m.id === chosenCodex || m.model === chosenCodex) : codexModels.find((m) => m.isDefault)) ||
+      codexModels[0];
+    if (matched?.supportedReasoningEfforts && matched.supportedReasoningEfforts.length > 0) {
+      options = matched.supportedReasoningEfforts.map((opt) => {
+        const meta = EFFORT_META[opt.reasoningEffort];
+        return {
+          value: opt.reasoningEffort,
+          label: meta?.label ?? opt.reasoningEffort,
+          desc: opt.description || meta?.desc || "",
+          translateDesc: !opt.description && Boolean(meta),
+        };
+      });
+      const fallbackVal =
+        matched.defaultReasoningEffort && options.some((o) => o.value === matched.defaultReasoningEffort)
+          ? matched.defaultReasoningEffort
+          : options[0].value;
+      activeValue = options.some((o) => o.value === codexEffort) ? codexEffort : fallbackVal;
+    } else {
+      options = DEFAULT_CODEX_EFFORT_ORDER.map((val) => ({
+        value: val,
+        label: EFFORT_META[val].label,
+        desc: EFFORT_META[val].desc,
+        translateDesc: true,
+      }));
+      activeValue = options.some((o) => o.value === codexEffort) ? codexEffort : "high";
+    }
+  } else {
+    options = EFFORT_OPTIONS;
+    activeValue = effort;
+  }
+
+  const current = options.find((o) => o.value === activeValue) ?? options[0];
 
   return (
     <div className="relative">
@@ -1864,39 +2261,49 @@ function EffortToggle() {
           open && "text-fg bg-hover",
         )}
       >
-        {current.value === "fast" ? (
+        {activeValue === "fast" || activeValue === "low" || activeValue === "minimal" ? (
           <Zap className="size-3.5 text-fg-dim shrink-0" strokeWidth={2} />
         ) : (
           <Brain className="size-3.5 text-fg-dim shrink-0" strokeWidth={2} />
         )}
-        <span>{t(current.label)}</span>
+        <span>{EFFORT_META[current.value] || current.value === "fast" || current.value === "thinking" ? t(current.label) : current.label}</span>
         <ChevronDown className={cn("size-3 shrink-0 opacity-60 transition-transform", open && "rotate-180")} strokeWidth={2} />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="wide-pop-up absolute bottom-full right-0 z-50 mb-2 w-48 overflow-hidden rounded-xl border border-line bg-panel p-1 shadow-2xl">
-            {EFFORT_OPTIONS.map((opt) => (
+          <div className="wide-pop-up absolute bottom-full right-0 z-50 mb-2 w-56 overflow-hidden rounded-xl border border-line bg-panel p-1 shadow-2xl">
+            {options.map((opt) => (
               <button
                 key={opt.value}
                 type="button"
                 onClick={() => {
-                  setEffort(opt.value);
+                  if (isAntigravity) {
+                    void setAntigravityEffort(opt.value as AiClaudeEffort);
+                  } else if (isClaudeCode) {
+                    void setClaudeEffort(opt.value as AiClaudeEffort);
+                  } else if (isCodex) {
+                    void setCodexEffort(opt.value);
+                  } else {
+                    setEffort(opt.value as "fast" | "thinking");
+                  }
                   setOpen(false);
                 }}
                 className={cn(
                   "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover",
-                  effort === opt.value ? "bg-hover text-fg" : "text-fg-dim",
+                  activeValue === opt.value ? "bg-hover text-fg" : "text-fg-dim",
                 )}
               >
-                {opt.value === "fast" ? (
+                {opt.value === "fast" || opt.value === "low" || opt.value === "minimal" ? (
                   <Zap className="mt-0.5 size-3.5 text-fg-dim shrink-0" strokeWidth={2} />
                 ) : (
                   <Brain className="mt-0.5 size-3.5 text-fg-dim shrink-0" strokeWidth={2} />
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-medium">{t(opt.label)}</div>
-                  <div className="text-[10px] text-fg-faint">{t(opt.desc)}</div>
+                  <div className="text-[12px] font-medium">
+                    {EFFORT_META[opt.value] || opt.value === "fast" || opt.value === "thinking" ? t(opt.label) : opt.label}
+                  </div>
+                  <div className="text-[10px] text-fg-faint">{opt.translateDesc ? t(opt.desc) : opt.desc}</div>
                 </div>
               </button>
             ))}
@@ -2034,7 +2441,7 @@ export function AiChatView({ id }: { id: string }) {
   const addImage = useCallback(
     (name: string, mime: string, data: string) => {
       if (!providerSupportsImages) {
-        toast.error(t("This model cannot read images. Switch to Claude, DeepSeek or a local vision model."));
+        toast.error(t("This model cannot read images. Switch to Claude Code, Antigravity, Codex, or a local vision model."));
         return;
       }
       if (!useAi.getState().attachImage(id, { name, mime, data })) {
@@ -2440,6 +2847,26 @@ export function AiChatView({ id }: { id: string }) {
               </div>
             )}
 
+            {!active && ready && loaded && (chat?.promptSuggestions?.length ?? 0) > 0 && (
+              <div className="flex flex-wrap gap-1.5 pb-2">
+                {(chat?.promptSuggestions ?? []).slice(0, 3).map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => {
+                      stuck.current = true;
+                      setAtBottom(true);
+                      void useAi.getState().ask(id, suggestion);
+                      composer.current?.focus();
+                    }}
+                    className="rounded-full border border-line/70 bg-panel/90 px-3 py-1 text-[11px] text-fg-dim hover:border-accent/50 hover:bg-hover hover:text-fg transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="relative rounded-2xl border border-line bg-panel/95 shadow-lg backdrop-blur-sm p-2.5">
               {attachments.length > 0 && (
                 <div className="flex flex-wrap gap-1 pb-2 px-1">
@@ -2557,9 +2984,12 @@ export function AiChatView({ id }: { id: string }) {
                     onCompact={contextTokens > 0 ? () => void useAi.getState().compactChat(id) : undefined}
                   />
                   <ModelPicker className="border-none bg-transparent hover:bg-hover text-fg-dim px-2 py-1 text-[12px]" />
+                  <ToolModeToggle />
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
+                  <InteractionModeToggle />
+                  <BrowserToggle />
                   <EffortToggle />
                   {speechSupported && (
                     <button

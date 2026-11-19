@@ -356,8 +356,8 @@ function registerSecScanHandlers() {
     try {
       const raw = await promises.readFile(SEC_DEFAULT_OSV_FILE, "utf8");
       secRemoteOsv = parseOsvDoc(JSON.parse(raw));
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("secscan", "load cached OSV failed", error, { ignoreCodes: ["ENOENT"] });
     }
   }
 
@@ -4008,7 +4008,9 @@ function registerSecScanHandlers() {
         const hit = matchVuln("composer", p.name, ver, projectOsv);
         if (hit) out.push(vulnFinding(file, p.name, p.version, hit, lineMap.get(p.name) || 1));
       }
-    } catch {}
+    } catch (error) {
+      reportRecoverableError("secscan", `parse composer lockfile failed (${file})`, error);
+    }
     return out;
   }
 
@@ -4044,7 +4046,9 @@ function registerSecScanHandlers() {
             if (hit) out.push(vulnFinding(file, name, ver, hit, lineMap.get(name) || 1));
           }
         }
-      } catch {}
+      } catch (error) {
+        reportRecoverableError("secscan", `parse Pipfile.lock failed (${file})`, error);
+      }
       return out;
     }
     const lines = content.split("\n");
@@ -4218,9 +4222,13 @@ function registerSecScanHandlers() {
         try {
           const a = await analyzeFile(osFile, content, lang, config);
           secSetFileEntry(fileMap, osFile, { ...a, mtime: stats.mtimeMs, size: stats.size });
-        } catch {  }
+        } catch (error) {
+          reportRecoverableError("secscan", `analyzeFile failed (${osFile})`, error);
+        }
       }
-    } catch {  }
+    } catch (error) {
+      reportRecoverableError("secscan", "project file traversal failed", error);
+    }
 
     for (const key of [...fileMap.keys()]) if (!present.has(key)) fileMap.delete(key);
     return collectFindings(fileMap, config, baseline, root);
@@ -4245,7 +4253,9 @@ function registerSecScanHandlers() {
         try {
           const a = await analyzeFile(osFile, text, lang, config);
           secSetFileEntry(fileMap, osFile, { ...a, mtime, size });
-        } catch {  }
+        } catch (error) {
+          reportRecoverableError("secscan", `single-file analysis failed (${osFile})`, error);
+        }
       }
     } else if (node_path.basename(filePath).toLowerCase() === "package.json" || SEC_MANIFESTS.has(node_path.basename(filePath).toLowerCase())) {
       let text = typeof content === "string" ? content : null;
@@ -4286,7 +4296,9 @@ function registerSecScanHandlers() {
         try {
           const a = await analyzeFile(osFile, text, lang, config);
           secSetFileEntry(fileMap, osFile, { ...a, mtime, size });
-        } catch {  }
+        } catch (error) {
+          reportRecoverableError("secscan", `single-file analysis failed (${osFile})`, error);
+        }
       }
     } else if (node_path.basename(filePath).toLowerCase() === "package.json" || SEC_MANIFESTS.has(node_path.basename(filePath).toLowerCase())) {
       let text = typeof content === "string" ? content : null;
@@ -4362,6 +4374,9 @@ function registerSecScanHandlers() {
 
   electron.ipcMain.handle("security:testRule", async (_event, pattern, flags, sample) => {
     if (typeof pattern !== "string" || !pattern) return { ok: false, error: "No pattern." };
+    if (__wideTs?.testUserRegexSafe) {
+      return __wideTs.testUserRegexSafe(pattern, flags, sample);
+    }
     let re;
     try {
       re = new RegExp(pattern, typeof flags === "string" ? flags.replace(/[^gimsuy]/g, "") : "");
@@ -4434,8 +4449,8 @@ function registerSecScanHandlers() {
         const raw = JSON.parse(await promises.readFile(wsFile, "utf8"));
         const rules = parseCustomRules(raw);
         if (rules.length > 0) return { ok: true, source: wsFile, count: rules.length };
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("secscan", "load workspace rules failed", error, { ignoreCodes: ["ENOENT"] });
       }
     }
     const bundledCandidates = [
@@ -4448,16 +4463,16 @@ function registerSecScanHandlers() {
         const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
         const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
         if (filtered.length > 0) return { ok: true, source: candidate, count: filtered.length, rules: filtered };
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("secscan", "load bundled rules candidate failed", error, { ignoreCodes: ["ENOENT"] });
       }
     }
     try {
       const raw = JSON.parse(await promises.readFile(SEC_DEFAULT_CACHE_FILE, "utf8"));
       const rules = parseCustomRules(raw);
       if (rules.length > 0) return { ok: true, source: SEC_DEFAULT_CACHE_FILE, count: rules.length };
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("secscan", "load cached rules failed", error, { ignoreCodes: ["ENOENT"] });
     }
     return { ok: true, source: "embedded", count: RULES.length };
   });
@@ -4508,8 +4523,8 @@ function registerSecScanHandlers() {
           const merged = typeof aiMergeEmbeddedAgentRules === "function" ? aiMergeEmbeddedAgentRules(list) : list;
           return { ok: true, source: wsAgentFile, count: merged.length, rules: merged };
         }
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("secscan", "load workspace agent rules failed", error, { ignoreCodes: ["ENOENT"] });
       }
       const wsFile = node_path.join(root, ".wide", "rules.json");
       try {
@@ -4520,8 +4535,8 @@ function registerSecScanHandlers() {
           const merged = typeof aiMergeEmbeddedAgentRules === "function" ? aiMergeEmbeddedAgentRules(filtered) : filtered;
           return { ok: true, source: wsFile, count: merged.length, rules: merged };
         }
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("secscan", "load workspace rules for agent failed", error, { ignoreCodes: ["ENOENT"] });
       }
     }
     try {
@@ -4532,8 +4547,8 @@ function registerSecScanHandlers() {
         const merged = typeof aiMergeEmbeddedAgentRules === "function" ? aiMergeEmbeddedAgentRules(filtered) : filtered;
         return { ok: true, source: SEC_DEFAULT_CACHE_FILE, count: merged.length, rules: merged };
       }
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("secscan", "load cached agent rules failed", error, { ignoreCodes: ["ENOENT"] });
     }
     const embeddedAgentRules = typeof AI_EMBEDDED_AGENT_RULES !== "undefined" ? [...AI_EMBEDDED_AGENT_RULES] : [];
     return {

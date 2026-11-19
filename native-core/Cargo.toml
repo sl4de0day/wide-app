@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83"
+
+[workspace.dependencies]
+wide-recon-core = { path = "crates/wide-recon-core" }
+wide-http-core  = { path = "crates/wide-http-core" }
+
+tokio       = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-util", "sync"] }
+futures     = "0.3"
+dashmap     = "6"
+lru         = "0.12"
+reqwest     = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "brotli", "deflate", "json"] }
+rustls      = "0.23"
+scraper     = "0.20"
+governor    = "0.7"
+url         = { version = "2", features = ["serde"] }
+psl         = "2"
+regex       = "1"
+blake3      = "1"
+fnv         = "1"
+petgraph    = "0.6"
+quick-xml   = "0.37"
+base64      = "0.22"
+rand        = "0.8"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+thiserror   = "2"

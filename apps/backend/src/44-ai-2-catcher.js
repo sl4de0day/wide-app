@@ -134,6 +134,88 @@ async function aiExecuteCatcherControl(input = {}, send) {
     return aiExecuteCatcherTrafficQuery({ limit: input.limit || 20 });
   }
 
+  if (act === "crawl") {
+    const seedUrl = String(input.url || "").trim();
+    if (!seedUrl) return "Provide `url` for Catcher crawl action.";
+    if (typeof reconStartCrawl !== "function") return "Recon engine is unavailable.";
+    const pages = [];
+    const res = await reconStartCrawl(
+      {
+        seeds: [seedUrl],
+        maxDepth: Number(input.maxDepth ?? 2),
+        maxPages: Number(input.maxPages ?? 40),
+        fieldScope: input.fieldScope || "rdn",
+        allowPrivate: Boolean(input.allowPrivate),
+        tlsProfile: input.tlsProfile || "none",
+      },
+      (ev) => {
+        if (ev.type === "page" && ev.page) pages.push(ev.page);
+      },
+    );
+    return JSON.stringify(
+      {
+        ok: Boolean(res?.ok),
+        visited: res?.visited || pages.length,
+        pages: pages.slice(0, 40).map((p) => ({
+          url: p.finalUrl || p.url,
+          status: p.status,
+          endpointClass: p.audit?.endpointClass || null,
+          technologies: p.audit?.technologies || [],
+          forms: (p.forms || []).length,
+          securityIssues: (p.audit?.securityHeaders || []).length,
+          secrets: (p.audit?.secrets || []).length,
+        })),
+        graph: res?.graph || null,
+      },
+      null,
+      2,
+    );
+  }
+
+  if (act === "audit_passive") {
+    if (typeof reconAuditResponse !== "function") return "Recon passive auditor is unavailable.";
+    const id = Number(input.id);
+    const entry = Number.isFinite(id) && id > 0 ? proxyLog.find((item) => item.id === id) : null;
+    const url = entry?.url || String(input.url || "");
+    if (!url) return "Provide either traffic `id` or `url` for passive audit.";
+    const res = await reconAuditResponse({
+      url,
+      method: entry?.method || input.method || "GET",
+      headers: entry?.resHeaders || input.headers || {},
+      body: entry?.resBody || input.body || "",
+      extractLinks: Boolean(input.extractLinks),
+    });
+    return JSON.stringify(res, null, 2);
+  }
+
+  if (act === "inspect") {
+    if (!__wideTs?.evaluateHttpInspection) return "HTTP inspection engine is unavailable.";
+    const id = Number(input.id);
+    const entry = Number.isFinite(id) && id > 0 ? proxyLog.find((item) => item.id === id) : null;
+    const url = entry?.url || String(input.url || "");
+    if (!url && !input.rawRequest) return "Provide traffic `id`, `url`, or `rawRequest` for inspection.";
+    const rep = __wideTs.evaluateHttpInspection(
+      {
+        url: url || "/",
+        method: entry?.method || input.method || "GET",
+        headers: entry?.reqHeaders || input.headers || [],
+        body: entry?.reqBody || input.body || "",
+        rawRequest: typeof input.rawRequest === "string" ? input.rawRequest : undefined,
+        rawResponse: typeof input.rawResponse === "string" ? input.rawResponse : undefined,
+      },
+      { learning: input.learning !== false },
+    );
+    return JSON.stringify({ ok: true, ...rep }, null, 2);
+  }
+
+  if (act === "inspect_smuggling") {
+    if (!__wideTs?.inspectRawHttpRequest) return "HTTP conformance checker is unavailable.";
+    const requestReport = input.rawRequest ? __wideTs.inspectRawHttpRequest(String(input.rawRequest)) : null;
+    const responseReport = input.rawResponse ? __wideTs.inspectRawHttpResponse(String(input.rawResponse), String(input.method || "GET")) : null;
+    const headerVectors = Array.isArray(input.headers) ? __wideTs.inspectHttpHeadersSmuggling(aiCatcherNormalizeHeaders(input.headers)) : [];
+    return JSON.stringify({ ok: true, requestReport, responseReport, headerVectors }, null, 2);
+  }
+
   return `Unknown Catcher action '${act}'.`;
 }
 
@@ -346,6 +428,8 @@ async function aiExecuteRepeaterSend(input = {}, send) {
   const opts = {
     insecure: input.insecure !== false,
     followRedirects: Boolean(input.followRedirects),
+    allowPrivate: input.allowPrivate !== false,
+    tlsProfile: input.tlsProfile || "",
     timeoutMs: 25000,
   };
   let reply;

@@ -64,6 +64,9 @@ async function writeAiEdit(path: string, root: string, content: string, mustExis
         useEditor.getState().replaceContent(path, content);
         void useEditor.getState().reloadFromDisk(path);
       }
+      if (/\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(path)) {
+        void bridge.tsSync(root, path, content);
+      }
       void useWorkspace.getState().refresh();
       return "applied";
     }
@@ -76,6 +79,17 @@ async function writeAiEdit(path: string, root: string, content: string, mustExis
     return "applied";
   }
   return "failed";
+}
+
+export function syncWrittenAiEdit(path: string, root: string, content: string): void {
+  if (openBuffer(path) !== null) {
+    useEditor.getState().replaceContent(path, content);
+    void useEditor.getState().reloadFromDisk(path);
+  }
+  if (/\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(path)) {
+    void bridge.tsSync(root, path, content);
+  }
+  void useWorkspace.getState().refresh();
 }
 
 export function applyAiEdit(path: string, root: string, content: string, mustExist = false): void {
@@ -99,7 +113,7 @@ interface AiEditsState {
   reviewEnabled: boolean;
   pending: PendingEdit[];
   setReview(on: boolean): void;
-  queue(edit: { path: string; root: string; content: string }): Promise<void>;
+  queue(edit: { path: string; root: string; content: string; oldContent?: string; existed?: boolean }): Promise<void>;
   accept(id: string): Promise<void>;
   reject(id: string): void;
   acceptAll(): Promise<void>;
@@ -146,16 +160,19 @@ export const useAiEdits = create<AiEditsState>((set, get) => ({
       try {
         const previous = [...get().pending].reverse().find((item) => item.path === edit.path);
         const buffer = openBuffer(edit.path);
-        const known = previous?.content ?? buffer;
+        const baseline = typeof edit.oldContent === "string" ? edit.oldContent : null;
+        const known = previous?.content ?? baseline ?? buffer;
         const disk = known === null ? await diskContent(edit.path) : null;
         set((state) => ({
           pending: [
             ...state.pending,
             {
               id: crypto.randomUUID(),
-              ...edit,
+              path: edit.path,
+              root: edit.root,
+              content: edit.content,
               oldContent: known ?? disk ?? "",
-              existed: previous ? previous.existed : buffer !== null || disk !== null,
+              existed: previous ? previous.existed : typeof edit.existed === "boolean" ? edit.existed : (buffer !== null || disk !== null),
             },
           ],
         }));

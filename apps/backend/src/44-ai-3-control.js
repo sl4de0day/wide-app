@@ -245,12 +245,22 @@ async function aiExecutePitcherSend(root, input = {}, send, signal = null) {
     res = await sendOnce(target, method, headerPairs, bodyStr, HTTP_MAX_REDIRECTS, {
       insecure: input.insecure !== false,
       bodyBase64: Boolean(input.bodyBase64),
+      allowPrivate: input.allowPrivate !== false,
+      allowCredentials: Boolean(input.allowCredentials),
+      retries: Number.isFinite(Number(input.retries)) ? Math.max(0, Math.min(4, Math.floor(Number(input.retries)))) : 0,
+      useBreaker: Boolean(input.useBreaker),
+      tlsProfile: input.tlsProfile || "",
       ...(signal ? { signal } : {}),
     });
   } else {
     res = await aiControlInvoke("http:send", target, method, headerPairs, bodyStr, {
       insecure: input.insecure !== false,
       bodyBase64: Boolean(input.bodyBase64),
+      allowPrivate: input.allowPrivate !== false,
+      allowCredentials: Boolean(input.allowCredentials),
+      retries: Number.isFinite(Number(input.retries)) ? Math.max(0, Math.min(4, Math.floor(Number(input.retries)))) : 0,
+      useBreaker: Boolean(input.useBreaker),
+      tlsProfile: input.tlsProfile || "",
     });
   }
 
@@ -351,14 +361,18 @@ async function aiExecuteFindingsQuery(root, input = {}) {
       scanFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
       suppressed = Number(parsed.suppressed || 0);
       baselineSkipped = Number(parsed.baselineSkipped || 0);
-    } catch {}
+    } catch (error) {
+      reportRecoverableError("ai-control", "parse exported security findings failed", error);
+    }
   }
 
   let manualFindings = [];
   try {
     const manualRaw = JSON.parse(await promises.readFile(node_path.join(root, ".wide", "findings.json"), "utf8"));
     if (Array.isArray(manualRaw)) manualFindings = manualRaw;
-  } catch {}
+  } catch (error) {
+    reportRecoverableError("ai-control", "load .wide/findings.json failed", error, { ignoreCodes: ["ENOENT"] });
+  }
 
   const severityFilter = input.severity ? String(input.severity).toLowerCase() : "";
   const ruleFilter = input.ruleId ? String(input.ruleId).toLowerCase() : "";

@@ -62,8 +62,8 @@ function mcpSend(conn, method, params, timeout) {
 function mcpNotify(conn, method, params) {
   try {
     conn.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
-  } catch {
-
+  } catch (error) {
+    reportRecoverableError("mcp", `send notification (${method}) failed`, error);
   }
 }
 
@@ -198,8 +198,8 @@ async function writeMcpTrust(trust) {
   try {
     await promises.mkdir(node_path.dirname(mcpTrustFile()), { recursive: true });
     await writeFileAtomic(mcpTrustFile(), JSON.stringify(trust, null, 2), "utf8");
-  } catch {
-    void 0;
+  } catch (error) {
+    reportRecoverableError("mcp", "persist trust store failed", error);
   }
 }
 
@@ -289,8 +289,8 @@ function registerMcpHandlers() {
     if (mcpRoot) {
       try {
         await ensureMcp(mcpRoot);
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("mcp", "reload MCP connections failed", error);
       }
     }
     return { ok: true };

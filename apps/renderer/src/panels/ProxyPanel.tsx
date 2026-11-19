@@ -2,7 +2,7 @@ import { ArrowUpRight, Braces, Copy, Crosshair, Download, FileCode2, FileDown, F
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { PanelHeader } from "@/components/SidePanel";
-import { bridge, type InterceptedRequest, type InterceptedResponse, type MatchReplaceRule, type ProxyEntry } from "@/lib/bridge";
+import { bridge, type InterceptedRequest, type InterceptedResponse, type MatchReplaceRule, type ProxyEntry, type ProxyInspectionReport } from "@/lib/bridge";
 import { fromHar, toHar } from "@/lib/har";
 import { toast } from "@/stores/toast";
 import { exportCatcherSession, importCatcherSession } from "@/lib/catcherSession";
@@ -173,12 +173,35 @@ function formatWsPayload(text: string, prettify: boolean): string {
 function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) {
   const hasCyberchef = useExtensions((state) => state.installed.has("cyberchef"));
   const t = useT();
-  const [tab, setTab] = useState<"request" | "response">("request");
+  const [tab, setTab] = useState<"request" | "response" | "inspect">("request");
+  const [inspectReport, setInspectReport] = useState<ProxyInspectionReport | null>(null);
   const [wsSeed, setWsSeed] = useState<{ text: string; direction: "up" | "down" } | null>(null);
   const [wsFilter, setWsFilter] = useState("");
   const [wsDir, setWsDir] = useState<"all" | "up" | "down">("all");
   const [selectedFrame, setSelectedFrame] = useState<number | null>(null);
   const [prettifyJson, setPrettifyJson] = useState(false);
+
+  useEffect(() => {
+    setInspectReport(null);
+  }, [entry.id]);
+
+  useEffect(() => {
+    if (tab !== "inspect") return;
+    let alive = true;
+    void bridge
+      .proxyInspectTraffic(
+        { url: entry.url, method: entry.method, headers: entry.reqHeaders, body: entry.reqBody },
+        { learning: true },
+      )
+      .then((res) => {
+        if (alive && res.ok && res.action && res.scores) {
+          setInspectReport(res as ProxyInspectionReport);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [tab, entry.id, entry.url, entry.method, entry.reqHeaders, entry.reqBody]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col border-t border-line">
@@ -551,7 +574,7 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
       })() : (
       <>
       <div className="flex shrink-0 border-b border-line">
-        {(["request", "response"] as const).map((name) => (
+        {(["request", "response", "inspect"] as const).map((name) => (
           <button
             key={name}
             type="button"
@@ -561,7 +584,7 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
               tab === name ? "border-b border-accent text-fg-bright" : "text-fg-dim hover:bg-hover hover:text-fg",
             )}
           >
-            {name === "request" ? t("Request") : t("Response")}
+            {name === "request" ? t("Request") : name === "response" ? t("Response") : t("Inspect")}
           </button>
         ))}
       </div>
@@ -577,6 +600,51 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
               </pre>
             )}
           </>
+        ) : tab === "inspect" ? (
+          <div className="space-y-2 text-[11px]">
+            {!inspectReport ? (
+              <p className="text-fg-faint">{t("Loading…")}</p>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-[10px] uppercase text-fg-bright">
+                    {inspectReport.action}
+                  </span>
+                  {Object.entries(inspectReport.scores).map(([cat, sc]) => (
+                    <span key={cat} className={cn("rounded-sm border px-1.5 py-0.5 font-mono text-[10px]", sc > 0 ? "border-amber-500/40 bg-amber-500/10 text-amber-300" : "border-line text-fg-faint")}>
+                      {cat}:{sc}
+                    </span>
+                  ))}
+                </div>
+                {inspectReport.smugglingVectors.length > 0 && (
+                  <div className="rounded-sm border border-rose-500/40 bg-rose-500/10 p-1.5 font-mono text-[10px] text-rose-300">
+                    SMUGGLING: {inspectReport.smugglingVectors.join(", ")}
+                  </div>
+                )}
+                {inspectReport.hits.map((h, idx) => (
+                  <div key={idx} className="rounded-sm border border-line bg-panel p-1.5">
+                    <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
+                      <span className="text-fg-bright">#{h.ruleId} {h.msg}</span>
+                      <span className="text-fg-faint">{h.zone}.{h.part}{h.name ? `[${h.name}]` : ""}</span>
+                    </div>
+                    <code className="mt-1 block truncate font-mono text-[10px] text-fg-dim">{h.sample}</code>
+                  </div>
+                ))}
+                {inspectReport.drafts.map((d, idx) => (
+                  <div key={idx} className="flex items-center justify-between gap-2 rounded-sm border border-sky-500/30 bg-sky-500/10 px-2 py-1 font-mono text-[10px]">
+                    <span className="min-w-0 truncate text-sky-200">{d.snippet}</span>
+                    <button
+                      type="button"
+                      onClick={() => void copyText(d.snippet).then((ok) => ok && toast.success(t("Copied")))}
+                      className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-fg hover:bg-hover"
+                    >
+                      {t("Copy exception")}
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
         ) : entry.error ? (
           <p className="text-[11px] text-status-error">{t(entry.error)}</p>
         ) : (
@@ -1063,6 +1131,11 @@ const TrafficRow = memo(function TrafficRow({ entry, selected }: { entry: ProxyE
         <span className="text-fg-dim">{host}</span>
         {path}
       </span>
+      {entry.inspectSummary?.trigger && (
+        <span className="shrink-0 rounded-sm border border-rose-500/40 bg-rose-500/10 px-1 py-0.5 font-mono text-[9px] font-semibold uppercase text-rose-300">
+          {entry.inspectSummary.smugglingVectors?.length ? "SMUGGLING" : entry.inspectSummary.trigger}
+        </span>
+      )}
       {issues ? (
         <span
           className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 font-mono text-[9px] font-semibold text-amber-400"

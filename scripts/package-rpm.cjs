@@ -8,7 +8,7 @@ const cp = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const SOURCE_DIR = path.join(DIST, 'wide-linux-x64');
-const VERSION = require(path.join(ROOT, 'package.json')).version || '0.4141126';
+const VERSION = require(path.join(ROOT, 'package.json')).version || '0.6191126';
 
 if (!fs.existsSync(SOURCE_DIR)) {
   console.log('[rpm] wide-linux-x64 not found, preparing first...');

@@ -3,7 +3,14 @@ import { useCallback, useEffect, useState } from "react";
 
 import { bridge } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
-import { analyze, PAGE_SIGNAL_SCRIPT, type Detection, type DetectionInput } from "@/lib/wappalyzer";
+import {
+  analyze,
+  BUILTIN_WAPPALYZER_RULESET,
+  mergeWappalyzerRulesets,
+  PAGE_SIGNAL_SCRIPT,
+  type Detection,
+  type DetectionInput,
+} from "@/lib/wappalyzer";
 import { loadWappalyzerRuleset } from "@/lib/wappalyzerRuleset";
 import { useFindings } from "@/stores/findings";
 import { useProxy } from "@/stores/proxy";
@@ -31,12 +38,8 @@ export function WappalyzerPanel({ tabId, url }: { tabId: string; url: string }) 
     }
     setBusy(true);
     setError("");
-    const ruleset = await loadWappalyzerRuleset();
-    if (!ruleset) {
-      setBusy(false);
-      setError(t("The Wappalyzer ruleset is not ready yet."));
-      return;
-    }
+    const external = await loadWappalyzerRuleset().catch(() => null);
+    const ruleset = mergeWappalyzerRulesets(BUILTIN_WAPPALYZER_RULESET, external);
     const reply = await bridge.browserCdp(tabId, "Runtime.evaluate", {
       expression: PAGE_SIGNAL_SCRIPT,
       returnByValue: true,

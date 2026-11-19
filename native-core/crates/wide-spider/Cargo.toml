@@ -1,0 +1,20 @@
+[package]
+name = "wide-spider"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "wide-spider"
+path = "src/main.rs"
+
+[dependencies]
+wide-recon-core = { workspace = true }
+wide-http-core  = { workspace = true }
+tokio           = { workspace = true }
+governor        = { workspace = true }
+url             = { workspace = true }
+dashmap         = { workspace = true }
+petgraph        = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }

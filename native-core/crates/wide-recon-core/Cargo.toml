@@ -1,0 +1,19 @@
+[package]
+name = "wide-recon-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+base64.workspace = true
+blake3.workspace = true
+dashmap.workspace = true
+fnv.workspace = true
+lru.workspace = true
+psl.workspace = true
+quick-xml.workspace = true
+regex.workspace = true
+scraper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true

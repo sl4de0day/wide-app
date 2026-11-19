@@ -772,8 +772,8 @@ async function mergeWappalyzer(dir) {
   for (const file of techFiles) {
     try {
       Object.assign(technologies, JSON.parse(await promises.readFile(file, "utf8")));
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("prepare", `parse technology file failed (${file})`, error);
     }
   }
   let categories = {};
@@ -781,8 +781,8 @@ async function mergeWappalyzer(dir) {
   if (categoriesFile) {
     try {
       categories = JSON.parse(await promises.readFile(categoriesFile, "utf8"));
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("prepare", `parse categories file failed (${categoriesFile})`, error);
     }
   }
   if (!Object.keys(technologies).length) {

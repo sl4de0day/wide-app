@@ -101,6 +101,8 @@ const GONE = [
   failed += await checkAgentEmojiGuardrail();
   failed += await checkDatabaseLifecycle();
   failed += await checkAiBrowserFeatures();
+  failed += await checkReconCoreEngine();
+  failed += await checkAiTrustArchitecture();
   failed += await checkRegressions();
   failed += checkNativeColours();
 
@@ -908,27 +910,25 @@ async function checkAgentEmojiGuardrail() {
   report(hasNoEmojis, 'security:loadAgentRules enforces wide/ai-no-emojis even over partial rule caches');
 
   const agentSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '44-ai-agent.js'), 'utf8');
-  const openCodeSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '50-ai-opencode.js'), 'utf8');
   const ctx = vm.createContext({
     node_path: pathSync,
     node_os: require('node:os'),
     promises: fsSync.promises,
     appRoot: () => ROOT,
+    __wideTs: require(pathSync.join(ROOT, 'out', 'main', 'backend-modules.cjs')),
   });
   const s1 = agentSrc.indexOf('function aiCreateStreamFilter');
-  const e1 = agentSrc.indexOf('function aiHasSubstantialCodeBlock');
+  const e1 = agentSrc.indexOf('function aiToolsFor');
   const s2 = agentSrc.indexOf('const AI_EMBEDDED_AGENT_RULES');
   const e2 = agentSrc.indexOf('async function aiExecuteDependencyCheck');
-  const s3 = openCodeSrc.indexOf('function openCodeCreateStreamFilter');
-  const e3 = openCodeSrc.indexOf('function openCodeBuildPrompt');
   vm.runInContext(
-    `${agentSrc.slice(s1, e1)}\n${agentSrc.slice(s2, e2)}\n${openCodeSrc.slice(s3, e3)}`,
+    `${agentSrc.slice(s1, e1)}\n${agentSrc.slice(s2, e2)}`,
     ctx
   );
 
   const collected = [];
   const sanitizer = ctx.aiCreateStreamEmojiSanitizer([]);
-  const filter = ctx.openCodeCreateStreamFilter((ev) => {
+  const filter = ctx.aiCreateStreamFilter((ev) => {
     const clean = sanitizer.sanitizeChunk(`${ev.type}:text`, ev.text);
     if (clean) collected.push({ type: ev.type, text: clean });
   });
@@ -1087,6 +1087,1554 @@ async function checkRegressions() {
   } finally {
     await worker.terminate();
   }
+
+  return failed;
+}
+
+async function checkAiTrustArchitecture() {
+  const fsSync = require('node:fs');
+  const pathSync = require('node:path');
+  const osSync = require('node:os');
+  const vm = require('node:vm');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const coreSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '43-ai-0-core.js'), 'utf8');
+  const toolsSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '44-ai-0-tools.js'), 'utf8');
+  const agentSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '44-ai-agent.js'), 'utf8');
+
+  report(
+    !coreSrc.includes('nudgedForFileWrite') && !agentSrc.includes('aiHasSubstantialCodeBlock'),
+    'hidden write nudge loop is removed from core and agent',
+  );
+  report(
+    !toolsSrc.includes('AI_TOOL_NAME_ALIASES') && !coreSrc.includes('aiNormalizeToolCall') && !agentSrc.includes('AI_ARGS_MAY_BE_EMPTY'),
+    'tool name alias guessing and empty-arg bypasses are removed',
+  );
+
+  const beforeExts = (await invoke('extensions:list', [])).result?.installed ?? [];
+  if (!beforeExts.includes('ai-assistant')) await invoke('extensions:install', ['ai-assistant']);
+  const cfgRes = await invoke('ai:config', []);
+  const migratedRes = await invoke('ai:config', [{ provider: 'deepseek' }]);
+  if (!beforeExts.includes('ai-assistant')) await invoke('extensions:remove', ['ai-assistant']);
+  const cfg = cfgRes.result?.config;
+  const migratedCfg = migratedRes.result?.config;
+  report(
+    cfgRes.result?.ok === true &&
+      cfg?.provider === 'claude-code' &&
+      !('gemini' in (cfg?.cloudModel ?? {})) &&
+      !('deepseek' in (cfg?.cloudModel ?? {})) &&
+      !('claude' in (cfg?.cloudModel ?? {})) &&
+      migratedCfg?.provider === 'claude-code' &&
+      cfg?.toolMode === 'full' &&
+      cfg?.interactionMode === 'agent' &&
+      cfg?.allowBrowser === true,
+    'ai:config defaults to claude-code, migrates legacy API providers, and scopes toolMode/interactionMode/allowBrowser',
+  );
+
+  const tsModules = require(pathSync.join(ROOT, 'out', 'main', 'backend-modules.cjs'));
+  const toolsCtx = vm.createContext({
+    console,
+    Set,
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    JSON,
+    Math,
+    __wideTs: tsModules,
+    aiLoadSdkVendor: () => require(pathSync.join(ROOT, 'out', 'main', 'ai-vendor.cjs')),
+  });
+  vm.runInContext(toolsSrc, toolsCtx);
+
+  const codeNoBrowser = toolsCtx.aiFilterTools({ allowWrites: true, toolMode: 'code', allowBrowser: false }).map((t) => t.name);
+  const codeWithBrowser = toolsCtx.aiFilterTools({ allowWrites: true, toolMode: 'code', allowBrowser: true }).map((t) => t.name);
+  const secNoBrowser = toolsCtx.aiFilterTools({ allowWrites: true, toolMode: 'security', allowBrowser: false }).map((t) => t.name);
+  const fullAsk = toolsCtx.aiFilterTools({ allowWrites: false, toolMode: 'full', allowBrowser: true }).map((t) => t.name);
+
+  report(
+    codeNoBrowser.includes('write_file') &&
+      codeNoBrowser.includes('edit_file') &&
+      !codeNoBrowser.includes('catcher_traffic_query') &&
+      !codeNoBrowser.includes('oast_control') &&
+      !codeNoBrowser.includes('browser_navigate'),
+    'aiFilterTools(code, browser=false) excludes security and browser tools',
+  );
+  report(
+    codeWithBrowser.includes('write_file') &&
+      codeWithBrowser.includes('browser_navigate') &&
+      !codeWithBrowser.includes('catcher_traffic_query'),
+    'aiFilterTools(code, browser=true) includes browser tools while keeping security tools excluded',
+  );
+  report(
+    secNoBrowser.includes('catcher_traffic_query') &&
+      secNoBrowser.includes('oast_control') &&
+      secNoBrowser.includes('read_file') &&
+      !secNoBrowser.includes('write_file') &&
+      !secNoBrowser.includes('browser_navigate'),
+    'aiFilterTools(security, browser=false) scopes to security and read-only tools',
+  );
+  report(
+    !fullAsk.includes('write_file') && !fullAsk.includes('edit_file') && !fullAsk.includes('run_command') && fullAsk.includes('read_file'),
+    'aiFilterTools(ask) strips all write and command execution tools',
+  );
+
+  const unknownRes = toolsCtx.aiValidateToolCall('writeFile', { path: 'a.ts', content: 'x' }, { allowWrites: true, toolMode: 'code', allowBrowser: true });
+  const aliasKeyRes = toolsCtx.aiValidateToolCall('write_file', { file_path: 'a.ts', content: 'x' }, { allowWrites: true, toolMode: 'code', allowBrowser: true });
+  const browserBlockedRes = toolsCtx.aiValidateToolCall('browser_navigate', { url: 'https://example.com' }, { allowWrites: true, toolMode: 'code', allowBrowser: false });
+  const askBlockedRes = toolsCtx.aiValidateToolCall('write_file', { path: 'a.ts', content: 'x' }, { allowWrites: false, toolMode: 'code', allowBrowser: true });
+  const validWriteRes = toolsCtx.aiValidateToolCall('write_file', { path: 'a.ts', content: 'export const x = 1;' }, { allowWrites: true, toolMode: 'code', allowBrowser: true });
+
+  report(
+    unknownRes.ok === false && String(unknownRes.error || '').startsWith('UNKNOWN_TOOL'),
+    'aiValidateToolCall rejects camelCase alias tool names with UNKNOWN_TOOL',
+  );
+  report(
+    aliasKeyRes.ok === false && String(aliasKeyRes.error || '').startsWith('SCHEMA_VALIDATION_ERROR'),
+    'aiValidateToolCall strictly rejects unknown parameter aliases (file_path) with SCHEMA_VALIDATION_ERROR',
+  );
+  report(
+    browserBlockedRes.ok === false && String(browserBlockedRes.error || '').startsWith('TOOL_DISABLED_IN_MODE'),
+    'aiValidateToolCall blocks browser tools when allowBrowser is false',
+  );
+  report(
+    askBlockedRes.ok === false && String(askBlockedRes.error || '').startsWith('PERMISSION_DENIED'),
+    'aiValidateToolCall blocks write tools in Ask mode',
+  );
+  report(
+    validWriteRes.ok === true && validWriteRes.input?.path === 'a.ts',
+    'aiValidateToolCall accepts strictly valid tool payloads',
+  );
+
+  const diagStart = agentSrc.indexOf('async function aiRunFileDiagnostics(');
+  const diagEnd = agentSrc.indexOf('async function aiGetDiagnostics(');
+  const runToolStart = agentSrc.indexOf('async function aiRunTool(');
+  const runToolEnd = agentSrc.indexOf('const aiTurns = new Map();');
+  const stageSlice =
+    diagStart !== -1 && diagEnd > diagStart && runToolStart !== -1 && runToolEnd > runToolStart
+      ? `${agentSrc.slice(diagStart, diagEnd)}\n${agentSrc.slice(runToolStart, runToolEnd)}`
+      : '';
+  if (!stageSlice) {
+    report(false, 'could not slice aiVerifyEditedFile and aiRunTool for staging smoke test');
+    return failed;
+  }
+
+  const emitted = [];
+  const tempRoot = pathSync.join(osSync.tmpdir(), `wide-trust-stage-${process.pid}`);
+  fsSync.mkdirSync(tempRoot, { recursive: true });
+  const agentCtx = vm.createContext({
+    console,
+    Buffer,
+    Map,
+    Set,
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    Promise,
+    JSON,
+    Math,
+    URL,
+    Date,
+    RegExp,
+    Error,
+    process,
+    node_path: pathSync,
+    fs: fsSync,
+    promises: fsSync.promises,
+    setTimeout,
+    clearTimeout,
+    MAX_FILE_BYTES$1: 1024 * 1024,
+    IGNORED$3: new Set(['node_modules', '.git']),
+    aiValidateToolCall: toolsCtx.aiValidateToolCall,
+    aiResolvePath: (root, rel) => {
+      const target = pathSync.resolve(root, String(rel || ''));
+      const relative = pathSync.relative(root, target).replace(/\\/g, '/');
+      if (relative.startsWith('..') || pathSync.isAbsolute(relative)) return { error: 'Path escapes root' };
+      return { path: target, relative };
+    },
+    aiAllowed: () => ({ ok: true }),
+    aiTrim: (text) => String(text ?? ''),
+    aiDiffCounts: () => ({ added: 1, removed: 0 }),
+    isProtectedInstructionsFile: () => false,
+    isMcpTool: () => false,
+    aiOffsetToPosition: () => ({ line: 1, col: 7 }),
+    writeFileAtomic: async (filePath, content) => {
+      await fsSync.promises.writeFile(filePath, content, 'utf8');
+    },
+    runLinter: async () => ({ ok: true, diagnostics: [] }),
+    lspGetCachedDiagnostics: () => [],
+    tsCall: async (cmd, args) => {
+      if (cmd === 'sync' && String(args?.[2] || '').includes('BROKEN_TS')) {
+        agentCtx.__lastSyncedBroken = true;
+        return { ok: true };
+      }
+      if (cmd === 'sync') {
+        agentCtx.__lastSyncedBroken = false;
+        return { ok: true };
+      }
+      if (cmd === 'diagnostics' && agentCtx.__lastSyncedBroken) {
+        return {
+          ok: true,
+          diagnostics: [{ from: 0, to: 10, severity: 'error', code: 1005, message: 'Syntax error in staged TS' }],
+        };
+      }
+      return { ok: true, diagnostics: [] };
+    },
+  });
+  vm.runInContext(stageSlice, agentCtx);
+
+  try {
+    const stagedFiles = new Map();
+    const stagedCtx = {
+      toolMode: 'code',
+      interactionMode: 'agent',
+      allowBrowser: false,
+      reviewEnabled: true,
+      stagedFiles,
+    };
+    const stageWrite = await agentCtx.aiRunTool(
+      tempRoot,
+      'write_file',
+      { path: 'demo.ts', content: 'const BROKEN_TS = ;' },
+      (ev) => emitted.push(ev),
+      true,
+      'write demo',
+      null,
+      stagedCtx,
+    );
+    const stageRead = await agentCtx.aiRunTool(
+      tempRoot,
+      'read_file',
+      { path: 'demo.ts' },
+      () => {},
+      true,
+      'read demo',
+      null,
+      stagedCtx,
+    );
+    const diskExists = fsSync.existsSync(pathSync.join(tempRoot, 'demo.ts'));
+    const stagedEditEv = emitted.find((e) => e.type === 'edit' && e.relativePath === undefined && pathSync.basename(String(e.path || '')) === 'demo.ts');
+    const verifyEv = emitted.find((e) => e.type === 'verification' && e.relativePath === 'demo.ts');
+
+    report(
+      typeof stageWrite === 'string' &&
+        stageWrite.includes('Staged demo.ts') &&
+        !diskExists &&
+        stagedEditEv?.staged === true &&
+        String(stageRead || '').includes('BROKEN_TS'),
+      'reviewEnabled stages writes in memory without touching disk and read_file reads staged content',
+    );
+    report(
+      verifyEv?.ok === false &&
+        verifyEv?.errors === 1 &&
+        typeof stageWrite === 'string' &&
+        stageWrite.includes('AUTO-VERIFICATION FAILED: 1 error(s) detected in demo.ts'),
+      'post-edit verification runs on staged in-memory content and reports diagnostics to both UI and model',
+    );
+  } finally {
+    try { fsSync.rmSync(tempRoot, { recursive: true, force: true }); } catch {}
+  }
+
+  const runtimeSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '00-runtime.js'), 'utf8');
+  const warnLogs = [];
+  const faultCalls = [];
+  const rtCtx = vm.createContext({
+    require: () => { throw Object.assign(new Error('missing'), { code: 'MODULE_NOT_FOUND' }); },
+    process,
+    console: {
+      warn: (...a) => warnLogs.push(a.join(' ')),
+      error: (...a) => warnLogs.push(a.join(' ')),
+    },
+    Intl,
+    Buffer,
+    setTimeout,
+    __wideTs: tsModules,
+    reportFault: (k, d) => faultCalls.push([k, d]),
+  });
+  vm.runInContext(runtimeSrc.slice(runtimeSrc.indexOf('function reportRecoverableError')), rtCtx);
+  rtCtx.reportRecoverableError('secscan', 'missing optional file', Object.assign(new Error('no file'), { code: 'ENOENT' }), { ignoreCodes: ['ENOENT'] });
+  rtCtx.reportRecoverableError('secscan', 'corrupt JSON rules', new SyntaxError('Unexpected token'), { surfaceToUi: true });
+  report(
+    warnLogs.length === 1 &&
+      warnLogs[0].includes('[secscan] corrupt JSON rules: Unexpected token') &&
+      faultCalls.length === 1 &&
+      faultCalls[0][0] === 'secscan',
+    'reportRecoverableError skips ENOENT when ignored and surfaces real errors to logs and backend:fault',
+  );
+
+  const xmlParsed = tsModules.aiExtractTextToolCalls('<tool_call><function=write_file><parameter=path>a.ts</parameter><parameter=content>ok</parameter></function></tool_call>');
+  const fencedFiltered = tsModules.aiExtractTextToolCalls('```json\n{"name":"unknownTool","arguments":{"x":1}}\n```', new Set(['write_file']));
+  report(
+    xmlParsed.length === 1 && xmlParsed[0].name === 'write_file' && xmlParsed[0].input.path === 'a.ts' && fencedFiltered.length === 0,
+    'TS local-fallback parses XML tool calls strictly and filters unknown fenced JSON calls',
+  );
+
+  const sampleRules = [
+    { id: 'wide/ai-direct-file-edits', severity: 'HIGH', instruction: 'Write directly.' },
+    { id: 'wide/ai-native-tool-priority', severity: 'HIGH', instruction: 'Prefer native tools.' },
+  ];
+  const askPromptRules = tsModules.aiFilterGuardrailsByContext(sampleRules, { allowWrites: false, toolMode: 'code', allowBrowser: false });
+  report(
+    !askPromptRules.includes('Write directly.') && askPromptRules.includes('lsp_navigate') && !askPromptRules.includes('catcher_*') && !askPromptRules.includes('browser_*'),
+    'TS prompt-builder strips write directives in Ask mode and scopes capabilities by mode + Browser toggle',
+  );
+
+  const doom = tsModules.aiCreateDoomLoopTracker();
+  doom.record('write_file', {}, 'SCHEMA_VALIDATION_ERROR for "write_file": bad args');
+  doom.record('write_file', {}, 'UNKNOWN_TOOL: nope');
+  doom.record('write_file', {}, 'PERMISSION_DENIED: ask');
+  report(
+    Boolean(doom.check('write_file', { path: 'a.ts' })),
+    'TS agent-loop doom-loop circuit breaker trips after 3 validation/permission failures',
+  );
+
+  const verifyFmt = tsModules.aiFormatVerificationMessage('/app/a.ts', 'a.ts', [
+    { source: 'TypeScript', line: 3, col: 5, severity: 'error', code: 'TS2322', message: 'Type mismatch' },
+  ]);
+  const lspStore = new tsModules.LspDiagnosticsCache();
+  lspStore.set('/tmp/x.ts', [{ line: 1, col: 1, severity: 'warning', message: 'unused' }]);
+  const macroVars = new Map();
+  let macroErr = false;
+  tsModules.extractMacroVars([{ name: 'tok', source: 'body', pattern: '[invalid(' }], [], 'body', macroVars, () => { macroErr = true; });
+  const secAi = tsModules.filterAiSecurityRules([{ id: 'wide/ai-1' }, { id: 'sqli' }]);
+  const dbHist = tsModules.prependDbHistory([{ connectionId: 'c1', sql: 'SELECT 1', durationMs: 1, rowCount: 1, ranAt: 1 }], { connectionId: 'c1', sql: 'SELECT 2', durationMs: 2, rowCount: 1, ranAt: 2 });
+  report(
+    verifyFmt.errors.length === 1 &&
+      verifyFmt.note.includes('AUTO-VERIFICATION FAILED') &&
+      lspStore.get('/tmp/x.ts').length === 1 &&
+      macroErr === true &&
+      secAi.length === 1 &&
+      dbHist.length === 2 &&
+      dbHist[0].sql === 'SELECT 2',
+    'TS verification, LSP cache, proxy macro, secscan rule filter, and DB history modules operate cleanly',
+  );
+
+  const allToolSpecs = toolsCtx.aiFilterTools({ allowWrites: true, toolMode: 'full', allowBrowser: true });
+  const authParsed = tsModules.parseClaudeAuthStatusJson('Notice\n{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"dev@wide.local","subscriptionType":"max"}');
+  const userImgLine = tsModules.serializeClaudeStreamUserMessage({
+    text: 'Check this screenshot',
+    images: [{ mediaType: 'image/png', data: 'data:image/png;base64,QUJDRA==' }],
+  });
+  const userImgObj = JSON.parse(userImgLine);
+  const fullCliArgs = tsModules.buildClaudeCliArgs({
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    model: 'sonnet',
+    fallbackModel: 'haiku',
+    effort: 'xhigh',
+    mode: 'agent',
+    toolMode: 'full',
+  });
+  const askCliArgs = tsModules.buildClaudeCliArgs({
+    resumeSessionId: '11111111-1111-4111-8111-111111111111',
+    forkSession: true,
+    mode: 'ask',
+    toolMode: 'code',
+  });
+  const secCliArgs = tsModules.buildClaudeCliArgs({
+    sessionId: '22222222-2222-4222-8222-222222222222',
+    mode: 'agent',
+    toolMode: 'security',
+  });
+  report(
+    authParsed?.loggedIn === true &&
+      authParsed.subscriptionType === 'max' &&
+      authParsed.email === 'dev@wide.local' &&
+      Array.isArray(userImgObj.message?.content) &&
+      userImgObj.message.content[0]?.type === 'image' &&
+      userImgObj.message.content[0]?.source?.data === 'QUJDRA==' &&
+      fullCliArgs.includes('--effort') &&
+      fullCliArgs.includes('xhigh') &&
+      !fullCliArgs.includes('--disallowedTools') &&
+      askCliArgs.includes('--resume') &&
+      askCliArgs.includes('--fork-session') &&
+      askCliArgs.includes('plan') &&
+      askCliArgs.includes('Edit') &&
+      secCliArgs.includes('--disallowedTools') &&
+      !secCliArgs.includes('Bash'),
+    'TS claude-stream parses auth status, multimodal images, and mode-scoped CLI flags accurately',
+  );
+
+  const claudeMcpFiltered = tsModules.aiFilterToolsForClaudeMcp(allToolSpecs, { allowWrites: true, toolMode: 'full', allowBrowser: true });
+  const claudeMcpNames = new Set(claudeMcpFiltered.map((t) => t.name));
+  report(
+    !claudeMcpNames.has('read_file') &&
+      !claudeMcpNames.has('edit_file') &&
+      !claudeMcpNames.has('write_file') &&
+      !claudeMcpNames.has('run_command') &&
+      claudeMcpNames.has('catcher_control') &&
+      claudeMcpNames.has('run_security_scan') &&
+      claudeMcpNames.has('browser_open') &&
+      claudeMcpNames.has('db_query_readonly'),
+    'Claude MCP filter excludes duplicate native workspace/shell tools while keeping Wide-unique tools',
+  );
+
+  const ccParser = new tsModules.ClaudeStreamEventParser();
+  const evs = [
+    ...ccParser.parseLine(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sess-xyz' })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'stream_event', event: { type: 'message_start' } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hel' } } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'lo' } } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tu_1', name: 'Edit', input: {} } } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"file_path":"a.ts"}' } } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hello' }, { type: 'tool_use', id: 'tu_1', name: 'Edit', input: { file_path: 'a.ts' } }] } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'Updated', is_error: false }] } })),
+    ...ccParser.parseLine(JSON.stringify({ type: 'prompt_suggestion', suggestion: 'Run tests next' })),
+    ...ccParser.parseLine(JSON.stringify({
+      type: 'result',
+      is_error: false,
+      total_cost_usd: 0.015,
+      duration_ms: 420,
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 200, cache_creation_input_tokens: 50 },
+    })),
+  ];
+  const deltasJoined = evs.filter((e) => e.type === 'delta').map((e) => e.text).join('');
+  const toolStarts = evs.filter((e) => e.type === 'tool_start');
+  const toolResults = evs.filter((e) => e.type === 'tool_result');
+  const suggs = evs.find((e) => e.type === 'prompt_suggestion');
+  const usageEv = evs.find((e) => e.type === 'usage');
+  report(
+    deltasJoined === 'Hello' &&
+      toolStarts.length === 1 &&
+      toolStarts[0].input.file_path === 'a.ts' &&
+      toolResults.length === 1 &&
+      toolResults[0].tool === 'Edit' &&
+      suggs?.suggestions?.[0] === 'Run tests next' &&
+      usageEv?.cacheReadTokens === 200 &&
+      usageEv?.totalCostUsd === 0.015,
+    'ClaudeStreamEventParser deduplicates partial deltas, captures tool schemas, suggestions, and cache/cost telemetry',
+  );
+
+  const mockCcRoot = fsSync.mkdtempSync(pathSync.join(os.tmpdir(), 'wide-mock-cc-'));
+  const prevWideClaudePath = process.env.WIDE_CLAUDE_PATH;
+  let ccCtx;
+  try {
+    const mockTargetFile = pathSync.join(mockCcRoot, 'demo.ts');
+    fsSync.writeFileSync(mockTargetFile, 'export const x = 1;\n', 'utf8');
+    const mockCliPath = pathSync.join(mockCcRoot, 'mock-claude.js');
+    const mockCliSource = [
+      "'use strict';",
+      "const fs = require('node:fs');",
+      "const readline = require('node:readline');",
+      "const args = process.argv.slice(2);",
+      "if (args[0] === 'auth' && args[1] === 'status') {",
+      "  process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', email: 'dev@wide.local', subscriptionType: 'max' }) + '\\n');",
+      "  process.exit(0);",
+      "}",
+      "if (args[0] === 'auth' && args[1] === 'logout') { process.exit(0); }",
+      "let turnCount = 0;",
+      "const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });",
+      "rl.on('line', (line) => {",
+      "  const t = line.trim();",
+      "  if (!t) return;",
+      "  turnCount += 1;",
+      "  let msg;",
+      "  try { msg = JSON.parse(t); } catch { return; }",
+      "  const sid = args[args.indexOf('--session-id') + 1] || 'mock-sid';",
+      "  if (turnCount === 1) {",
+      "    process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid }) + '\\n');",
+      "    process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu_edit_1', name: 'Edit', input: { file_path: 'demo.ts', old_string: '1', new_string: '2' } }] } }) + '\\n');",
+      "    setTimeout(() => {",
+      "      fs.writeFileSync(" + JSON.stringify(mockTargetFile) + ", 'export const x = 2;\\n', 'utf8');",
+      "      process.stdout.write(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu_edit_1', content: 'ok', is_error: false }] } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ type: 'stream_event', event: { type: 'message_start' } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'pid:' + process.pid } } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ type: 'prompt_suggestion', suggestion: 'Verify types' }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ type: 'result', is_error: false, session_id: sid, total_cost_usd: 0.01, usage: { input_tokens: 5, output_tokens: 3, cache_read_input_tokens: 100 } }) + '\\n');",
+      "    }, 20);",
+      "  } else {",
+      "    const userTxt = typeof msg.message?.content === 'string' ? msg.message.content : 'img';",
+      "    process.stdout.write(JSON.stringify({ type: 'stream_event', event: { type: 'message_start' } }) + '\\n');",
+      "    process.stdout.write(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'pid:' + process.pid + ':' + userTxt } } }) + '\\n');",
+      "    process.stdout.write(JSON.stringify({ type: 'result', is_error: false, session_id: sid, usage: { input_tokens: 2, output_tokens: 2 } }) + '\\n');",
+      "  }",
+      "});",
+    ].join('\n');
+    fsSync.writeFileSync(mockCliPath, mockCliSource, 'utf8');
+    process.env.WIDE_CLAUDE_PATH = mockCliPath;
+
+    const ccSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '50-ai-claude-code.js'), 'utf8');
+    let savedConfig = { claudeCodeSignedIn: false, claudeEffort: 'high', claudeFallbackModel: 'sonnet' };
+    const sessionMeta = new Map();
+    const ipcHandlers = new Map();
+    ccCtx = vm.createContext({
+      require,
+      process,
+      console,
+      Buffer,
+      setTimeout,
+      clearTimeout,
+      __dirname: pathSync.join(ROOT, 'apps', 'backend'),
+      electron: { ipcMain: { handle: (ch, fn) => ipcHandlers.set(ch, fn) } },
+      node_path: pathSync,
+      promises: fsSync.promises,
+      node_fs: fsSync,
+      node_child_process: require('node:child_process'),
+      node_crypto: require('node:crypto'),
+      node_os: os,
+      node_http: require('node:http'),
+      __wideTs: tsModules,
+      requireInstalled: async () => null,
+      readAiConfig: async () => savedConfig,
+      writeAiConfig: async (next) => { savedConfig = next; return next; },
+      getAiSessionClaudeMeta: async (id) => sessionMeta.get(id) || { claudeSessionId: '', claudeSyncedCount: 0 },
+      setAiSessionClaudeMeta: async (id, meta) => {
+        const cur = sessionMeta.get(id) || { claudeSessionId: '', claudeSyncedCount: 0 };
+        sessionMeta.set(id, { ...cur, ...meta });
+      },
+      AI_TOOLS: allToolSpecs,
+      aiRunTool: async () => 'mock_tool_ok',
+      aiResolvePath: (root, rel) => {
+        const target = pathSync.resolve(root, String(rel || ''));
+        const relative = pathSync.relative(root, target).replace(/\\/g, '/');
+        if (relative.startsWith('..') || pathSync.isAbsolute(relative)) return { error: 'Path escapes' };
+        return { path: target, relative };
+      },
+      aiDiffCounts: () => ({ added: 1, removed: 1 }),
+      aiVerifyEditedFile: async (_r, p, rel, _c, _s, sendFn) => {
+        sendFn({ type: 'verification', path: p, relativePath: rel, ok: true, errors: 0, warnings: 0, diagnostics: [] });
+        return '';
+      },
+    });
+    vm.runInContext(ccSrc, ccCtx);
+    ccCtx.registerClaudeCodeHandlers();
+
+    const statusReply = await ipcHandlers.get('ai:claudeCodeStatus')();
+    const evsTurn1 = [];
+    const r1 = await ccCtx.aiRunClaudeCodeTurn({
+      root: mockCcRoot,
+      sessionId: '0123456789abcdef0123456789abcdef',
+      model: 'sonnet',
+      effort: 'high',
+      messages: [{ role: 'user', content: 'Edit demo' }],
+      allowWrites: true,
+      toolMode: 'full',
+      send: (ev) => evsTurn1.push(ev),
+    });
+    const evsTurn2 = [];
+    const r2 = await ccCtx.aiRunClaudeCodeTurn({
+      root: mockCcRoot,
+      sessionId: '0123456789abcdef0123456789abcdef',
+      model: 'sonnet',
+      effort: 'high',
+      messages: [
+        { role: 'user', content: 'Edit demo' },
+        { role: 'assistant', content: 'done' },
+        { role: 'user', content: 'second_turn' },
+      ],
+      allowWrites: true,
+      toolMode: 'full',
+      send: (ev) => evsTurn2.push(ev),
+    });
+
+    const t1Text = evsTurn1.filter((e) => e.type === 'text').map((e) => e.text).join('');
+    const t2Text = evsTurn2.filter((e) => e.type === 'text').map((e) => e.text).join('');
+    const pid1 = t1Text.startsWith('pid:') ? t1Text.slice(4) : '';
+    const pid2Match = /^pid:(\d+):second_turn$/.exec(t2Text);
+    const editEv = evsTurn1.find((e) => e.type === 'edit');
+    const verEv = evsTurn1.find((e) => e.type === 'verification');
+    const sugEv = evsTurn1.find((e) => e.type === 'prompt_suggestion');
+
+    await ipcHandlers.get('ai:claudeCodeLogout')();
+    const sssfText = fsSync.readFileSync(pathSync.join(ROOT, 'resources', 'sssF.include'), 'utf8');
+
+    report(
+      statusReply?.loggedIn === true &&
+        statusReply?.subscriptionType === 'max' &&
+        r1?.ok === true &&
+        r2?.ok === true &&
+        Boolean(pid1) &&
+        pid2Match?.[1] === pid1 &&
+        editEv?.staged === false &&
+        editEv?.oldContent === 'export const x = 1;\n' &&
+        editEv?.content === 'export const x = 2;\n' &&
+        verEv?.ok === true &&
+        sugEv?.suggestions?.[0] === 'Verify types' &&
+        savedConfig.claudeCodeSignedIn === false &&
+        sssfText.includes('ai:claudeCodeLogout') &&
+        sssfText.includes('ai:closeClaudeSession') &&
+        sssfText.includes('claude-code|antigravity|codex|local') &&
+        sssfText.includes('ai:antigravityStatus') &&
+        sssfText.includes('ai:closeAntigravitySession') &&
+        sssfText.includes('ai:codexStatus') &&
+        sssfText.includes('ai:closeCodexSession') &&
+        !sssfText.includes('ai:openCodeStatus') &&
+        !sssfText.includes('ai:setKey') &&
+        !sssfText.includes('ai:verifyKey') &&
+        !sssfText.includes('ai:keyStatus'),
+      'Persistent Claude Code worker reuses warm PID, snapshots native Edit diffs, verifies post-edit, and respects SSSF auth channels',
+    );
+  } finally {
+    if (ccCtx && typeof ccCtx.claudeCodeStopAll === 'function') {
+      try { ccCtx.claudeCodeStopAll(); } catch {}
+    }
+    if (prevWideClaudePath === undefined) delete process.env.WIDE_CLAUDE_PATH;
+    else process.env.WIDE_CLAUDE_PATH = prevWideClaudePath;
+    try { fsSync.rmSync(mockCcRoot, { recursive: true, force: true }); } catch {}
+  }
+
+  const agyModelsSample = [
+    'Fetching available models...',
+    'gemini-4-neon-high\tGemini 4 Neon (High)',
+    'gemini-4-neon-xhigh\tGemini 4 Neon (Extra High)',
+    'gemini-4-neon-low\tGemini 4 Neon (Low)',
+    'claude-sonnet-5-5-high\tClaude Sonnet 5.5 (High)',
+    'gpt-oss-120b-medium\tGPT-OSS 120B (Medium)',
+  ].join('\n');
+  const parsedFamilies = tsModules.parseAntigravityModelsOutput(agyModelsSample);
+  const resolvedXhigh = tsModules.resolveAntigravityModelForEffort('gemini-4-neon', 'xhigh', parsedFamilies);
+  const resolvedFallback = tsModules.resolveAntigravityModelForEffort('gpt-oss-120b', 'max', parsedFamilies);
+  const askArgs = tsModules.buildAntigravityCliArgs({ mode: 'ask', conversationId: 'c1', model: 'gemini-4-neon-high', effort: 'high' });
+  const agentArgs = tsModules.buildAntigravityCliArgs({ mode: 'agent', model: 'gemini-4-neon-xhigh', effort: 'xhigh' });
+  const authErr = tsModules.classifyAntigravityError('Not logged in to Google Antigravity');
+  report(
+    parsedFamilies.length === 3 &&
+      Boolean(parsedFamilies[0].variants?.xhigh) &&
+      resolvedXhigh === 'gemini-4-neon-xhigh' &&
+      resolvedFallback === 'gpt-oss-120b-medium' &&
+      askArgs.includes('--mode') &&
+      askArgs.includes('plan') &&
+      askArgs.includes('--print=') &&
+      !askArgs.includes('--dangerously-skip-permissions') &&
+      agentArgs.includes('accept-edits') &&
+      agentArgs.includes('--dangerously-skip-permissions') &&
+      authErr.kind === 'auth',
+    'Antigravity TS helpers parse dynamic model families, resolve efforts, enforce plan vs accept-edits CLI flags, and classify auth errors',
+  );
+
+  const mockAgyRoot = fsSync.mkdtempSync(pathSync.join(os.tmpdir(), 'wide-agy-smoke-'));
+  const mockAgyTargetFile = pathSync.join(mockAgyRoot, 'demo.ts');
+  const mockPlanOutsideFile = pathSync.join(mockAgyRoot, 'outside', 'plan.md');
+  const mockMcpStateFile = pathSync.join(mockAgyRoot, 'mcp-state.txt');
+  fsSync.mkdirSync(pathSync.dirname(mockPlanOutsideFile), { recursive: true });
+  fsSync.writeFileSync(mockAgyTargetFile, 'export const a = 1;\n', 'utf8');
+  const prevWideAgyPath = process.env.WIDE_AGY_PATH;
+  let agyCtx = null;
+
+  try {
+    const mockAgyPath = pathSync.join(mockAgyRoot, 'mock-agy.js');
+    const mockAgySource = [
+      "const fs = require('node:fs');",
+      "const readline = require('node:readline');",
+      "const args = process.argv.slice(2);",
+      "if (args[0] === '--version') {",
+      "  process.stdout.write('1.4.12\\n');",
+      "  process.exit(0);",
+      "}",
+      "if (args[0] === 'models') {",
+      "  process.stdout.write('gemini-4-neon-high\\tGemini 4 Neon (High)\\ngemini-4-neon-xhigh\\tGemini 4 Neon (Extra High)\\ngpt-oss-120b-medium\\tGPT-OSS 120B (Medium)\\n');",
+      "  process.exit(0);",
+      "}",
+      "if (args[0] === 'mcp' && args[1] === 'list') {",
+      "  const attached = fs.existsSync(" + JSON.stringify(mockMcpStateFile) + ") ? fs.readFileSync(" + JSON.stringify(mockMcpStateFile) + ", 'utf8') : '';",
+      "  process.stdout.write('NAME\\tTYPE\\tSTATUS\\tCOMMAND/URL\\n' + (attached ? 'wide\\thttp\\tenabled\\t' + attached + '\\n' : ''));",
+      "  process.exit(0);",
+      "}",
+      "if (args[0] === 'mcp' && args[1] === 'add') {",
+      "  const url = args[args.length - 1] || '';",
+      "  fs.writeFileSync(" + JSON.stringify(mockMcpStateFile) + ", url + '|' + args.join(' '), 'utf8');",
+      "  process.exit(0);",
+      "}",
+      "let turnCount = 0;",
+      "const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });",
+      "rl.on('line', (line) => {",
+      "  const t = line.trim();",
+      "  if (!t) return;",
+      "  turnCount += 1;",
+      "  let msg;",
+      "  try { msg = JSON.parse(t); } catch { return; }",
+      "  const cid = 'agy-conv-1';",
+      "  if (turnCount === 1) {",
+      "    process.stdout.write(JSON.stringify({ event: 'init', conversation_id: cid, init: { model: 'gemini-4-neon-xhigh' } }) + '\\n');",
+      "    process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: cid, step_index: 1, state: 'ACTIVE', step_type: 'tool', tool_name: 'edit_file', tool_info: { name: 'edit_file', parameters: { Path: " + JSON.stringify(mockPlanOutsideFile) + " } } } }) + '\\n');",
+      "    process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: cid, step_index: 1, state: 'DONE', step_type: 'tool', tool_name: 'edit_file', tool_info: { name: 'edit_file', output: 'wrote plan' } } }) + '\\n');",
+      "    process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: cid, step_index: 2, state: 'ACTIVE', step_type: 'tool', tool_name: 'edit_file', tool_info: { name: 'edit_file', parameters: { Path: 'demo.ts' } } } }) + '\\n');",
+      "    setTimeout(() => {",
+      "      fs.writeFileSync(" + JSON.stringify(mockPlanOutsideFile) + ", '# Plan\\n', 'utf8');",
+      "      fs.writeFileSync(" + JSON.stringify(mockAgyTargetFile) + ", 'export const a = 2;\\n', 'utf8');",
+      "      process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: cid, step_index: 2, state: 'DONE', step_type: 'tool', tool_name: 'edit_file', tool_info: { name: 'edit_file', output: 'edited demo.ts' } } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: cid, step_index: 3, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'pid:' + process.pid } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ event: 'result', result: { conversation_id: cid, status: 'SUCCESS', response: 'pid:' + process.pid, usage: { input_tokens: 10, output_tokens: 4, thinking_tokens: 2, cache_read_tokens: 0, total_tokens: 16 } } }) + '\\n');",
+      "    }, 20);",
+      "  } else {",
+      "    const userTxt = typeof msg.message?.content === 'string' ? msg.message.content : 'img';",
+      "    process.stdout.write(JSON.stringify({ event: 'step_update', step_update: { conversation_id: cid, step_index: 4, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'pid:' + process.pid + ':' + userTxt } }) + '\\n');",
+      "    process.stdout.write(JSON.stringify({ event: 'result', result: { conversation_id: cid, status: 'SUCCESS', response: 'pid:' + process.pid + ':' + userTxt, usage: { input_tokens: 3, output_tokens: 2, thinking_tokens: 0, cache_read_tokens: 0, total_tokens: 5 } } }) + '\\n');",
+      "  }",
+      "});",
+    ].join('\n');
+    fsSync.writeFileSync(mockAgyPath, mockAgySource, 'utf8');
+    process.env.WIDE_AGY_PATH = mockAgyPath;
+
+    const agySrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '50-ai-antigravity.js'), 'utf8');
+    const agyMeta = new Map();
+    const agyHandlers = new Map();
+    agyCtx = vm.createContext({
+      require,
+      process,
+      console,
+      Buffer,
+      setTimeout,
+      clearTimeout,
+      __dirname: pathSync.join(ROOT, 'apps', 'backend'),
+      electron: { ipcMain: { handle: (ch, fn) => agyHandlers.set(ch, fn) } },
+      node_path: pathSync,
+      promises: fsSync.promises,
+      node_fs: fsSync,
+      node_child_process: require('node:child_process'),
+      node_crypto: require('node:crypto'),
+      node_os: os,
+      node_http: require('node:http'),
+      __wideTs: tsModules,
+      getAiSessionAntigravityMeta: async (id) => agyMeta.get(id) || { conversationId: '' },
+      setAiSessionAntigravityMeta: async (id, meta) => {
+        const cur = agyMeta.get(id) || { conversationId: '' };
+        agyMeta.set(id, { ...cur, ...meta });
+      },
+      AI_TOOLS: allToolSpecs,
+      aiRunTool: async () => 'mock_agy_mcp_ok',
+      aiResolvePath: (root, rel) => {
+        const target = pathSync.resolve(root, String(rel || ''));
+        const normRoot = pathSync.resolve(root);
+        if (target === normRoot || target.startsWith(normRoot + pathSync.sep)) {
+          if (target.startsWith(pathSync.join(normRoot, 'outside'))) return null;
+          return target;
+        }
+        return null;
+      },
+      aiDiffCounts: (before, after) => ({
+        added: before === after ? 0 : 1,
+        removed: before === after ? 0 : 1,
+      }),
+      aiVerifyEditedFile: async (root, resolvedPath, relPath, _content, _staged, send) => {
+        send({ type: 'verification', path: relPath, relativePath: relPath, ok: true, errors: 0, warnings: 0, diagnostics: [] });
+        return { ok: true, errors: 0, warnings: 0 };
+      },
+    });
+    vm.runInContext(agySrc, agyCtx, { filename: '50-ai-antigravity.js' });
+    agyCtx.registerAntigravityHandlers();
+
+    const stInitial = await agyHandlers.get('ai:antigravityStatus')({ force: true });
+    const attachReply = await agyHandlers.get('ai:antigravityAttachMcp')();
+    const mcpRecord = fsSync.existsSync(mockMcpStateFile) ? fsSync.readFileSync(mockMcpStateFile, 'utf8') : '';
+
+    const workRoot = mockAgyRoot;
+    const agyEv1 = [];
+    const ar1 = await agyCtx.aiRunAntigravityTurn({
+      root: workRoot,
+      sessionId: 'agy-smoke-sess',
+      model: 'gemini-4-neon',
+      effort: 'xhigh',
+      messages: [{ role: 'user', content: 'Edit demo' }],
+      allowWrites: true,
+      toolMode: 'full',
+      send: (ev) => agyEv1.push(ev),
+    });
+    const agyEv2 = [];
+    const ar2 = await agyCtx.aiRunAntigravityTurn({
+      root: workRoot,
+      sessionId: 'agy-smoke-sess',
+      model: 'gemini-4-neon',
+      effort: 'xhigh',
+      messages: [
+        { role: 'user', content: 'Edit demo' },
+        { role: 'assistant', content: 'done' },
+        { role: 'user', content: 'turn_two' },
+      ],
+      allowWrites: true,
+      toolMode: 'full',
+      send: (ev) => agyEv2.push(ev),
+    });
+
+    const at1 = agyEv1.filter((e) => e.type === 'text').map((e) => e.text).join('');
+    const at2 = agyEv2.filter((e) => e.type === 'text').map((e) => e.text).join('');
+    const apid1 = at1.startsWith('pid:') ? at1.slice(4) : '';
+    const apid2Match = /^pid:(\d+):turn_two$/.exec(at2);
+    const agyEdits = agyEv1.filter((e) => e.type === 'edit');
+    const agyVer = agyEv1.find((e) => e.type === 'verification');
+
+    report(
+      stInitial?.installed === true &&
+        stInitial?.signedIn === true &&
+        stInitial?.version === '1.4.12' &&
+        stInitial?.mcpAttached === false &&
+        attachReply?.ok === true &&
+        attachReply?.status?.mcpAttached === true &&
+        mcpRecord.includes('Authorization: Bearer ') &&
+        mcpRecord.includes('--type http wide http://127.0.0.1:') &&
+        ar1?.ok === true &&
+        ar2?.ok === true &&
+        Boolean(apid1) &&
+        apid2Match?.[1] === apid1 &&
+        agyEdits.length === 1 &&
+        agyEdits[0].path === 'demo.ts' &&
+        agyEdits[0].staged === false &&
+        agyEdits[0].oldContent === 'export const a = 1;\n' &&
+        agyEdits[0].content === 'export const a = 2;\n' &&
+        agyVer?.ok === true &&
+        agyMeta.get('agy-smoke-sess')?.conversationId === 'agy-conv-1',
+      'Persistent Antigravity worker reuses warm PID, ignores non-workspace edits, snapshots workspace diffs, verifies post-edit, and attaches HTTP MCP',
+    );
+  } finally {
+    if (agyCtx && typeof agyCtx.antigravityStopAll === 'function') {
+      try { agyCtx.antigravityStopAll(); } catch {}
+    }
+    if (prevWideAgyPath === undefined) delete process.env.WIDE_AGY_PATH;
+    else process.env.WIDE_AGY_PATH = prevWideAgyPath;
+    try { fsSync.rmSync(mockAgyRoot, { recursive: true, force: true }); } catch {}
+  }
+
+  const codexSanitized = tsModules.sanitizeCodexEnv({
+    PATH: '/usr/bin',
+    OPENAI_API_KEY: 'sk-blocked',
+    OPENAI_BASE_URL: 'https://bad.local',
+    OPENAI_ORG_ID: 'org-bad',
+    OPENAI_PROJECT_ID: 'proj-bad',
+    CODEX_API_KEY: 'codex-bad',
+  });
+  const codexModelsSample = tsModules.normalizeCodexModelsResponse({
+    data: [
+      {
+        id: 'gpt-6.2-sol',
+        model: 'gpt-6.2-sol',
+        displayName: 'gpt-6.2-sol',
+        defaultReasoningEffort: 'high',
+        isDefault: true,
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast' },
+          { reasoningEffort: 'medium', description: 'Balanced' },
+          { reasoningEffort: 'high', description: 'Thorough' },
+          { reasoningEffort: 'ultra', description: 'Maximum' },
+        ],
+      },
+      {
+        id: 'gpt-5.5',
+        model: 'gpt-5.5',
+        displayName: 'gpt-5.5',
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast' },
+          { reasoningEffort: 'medium', description: 'Balanced' },
+          { reasoningEffort: 'high', description: 'Thorough' },
+        ],
+      },
+    ],
+  });
+  const accApiKey = tsModules.parseCodexAccountResult({ account: { type: 'apiKey' } });
+  const accChatGpt = tsModules.parseCodexAccountResult({ account: { type: 'chatgpt', email: 'dev@example.com', planType: 'pro' } });
+  const codexAskThread = tsModules.buildCodexThreadStartParams({ root: '/repo', model: 'gpt-6.2-sol', mode: 'ask' });
+  const codexAgentThread = tsModules.buildCodexThreadStartParams({ root: '/repo', model: 'gpt-6.2-sol', mode: 'agent' });
+  const codexArgs = tsModules.buildCodexAppServerArgs({ mcpUrl: 'http://127.0.0.1:9999/mcp', bearerEnvVar: 'WIDE_CODEX_MCP_TOKEN' });
+
+  const codexParser = new tsModules.CodexAppServerNotificationParser();
+  const cEv1 = codexParser.feedNotification('item/agentMessage/delta', { itemId: 'm1', delta: 'Hi ' });
+  const cEv2 = codexParser.feedNotification('item/started', {
+    item: { type: 'fileChange', id: 'fc1', changes: [{ path: 'demo.ts', kind: { type: 'update' } }] },
+  });
+  const cEv3 = codexParser.feedNotification('item/completed', {
+    item: { type: 'fileChange', id: 'fc1', status: 'completed', changes: [{ path: 'demo.ts', kind: { type: 'update' } }] },
+  });
+  const cEv4 = codexParser.feedNotification('turn/completed', { turn: { id: 't1', status: 'completed' } });
+
+  report(
+    codexSanitized.PATH === '/usr/bin' &&
+      !('OPENAI_API_KEY' in codexSanitized) &&
+      !('OPENAI_BASE_URL' in codexSanitized) &&
+      !('CODEX_API_KEY' in codexSanitized) &&
+      codexModelsSample.length === 2 &&
+      tsModules.resolveCodexEffortForModel('gpt-6.2-sol', 'ultra', codexModelsSample) === 'ultra' &&
+      tsModules.resolveCodexEffortForModel('gpt-5.5', 'ultra', codexModelsSample) === 'high' &&
+      accApiKey.signedIn === false &&
+      accChatGpt.signedIn === true &&
+      accChatGpt.planType === 'pro' &&
+      codexAskThread.sandbox === 'read-only' &&
+      codexAgentThread.sandbox === 'workspace-write' &&
+      codexArgs.includes('stdio://') &&
+      codexArgs.some((a) => a.includes('mcp_servers.wide.url="http://127.0.0.1:9999/mcp"')) &&
+      cEv1[0]?.type === 'delta' &&
+      cEv2[0]?.type === 'tool_start' &&
+      cEv2[0]?.tool === 'fileChange' &&
+      cEv3[0]?.type === 'tool_result' &&
+      cEv4[0]?.type === 'turn_done',
+    'Codex TS helpers enforce strict ChatGPT auth, strip OpenAI API keys, resolve per-model efforts, and parse JSON-RPC notifications',
+  );
+
+  const mockCodexRoot = fsSync.mkdtempSync(pathSync.join(os.tmpdir(), 'wide-codex-smoke-'));
+  const mockCodexFile = pathSync.join(mockCodexRoot, 'demo.ts');
+  const mockCodexOutside = pathSync.join(mockCodexRoot, 'outside', 'secret.md');
+  fsSync.mkdirSync(pathSync.dirname(mockCodexOutside), { recursive: true });
+  fsSync.writeFileSync(mockCodexFile, 'export const c = 1;\n', 'utf8');
+  const prevWideCodexPath = process.env.WIDE_CODEX_PATH;
+  const prevOpenAiKey = process.env.OPENAI_API_KEY;
+  let codexCtx = null;
+
+  try {
+    const mockCodexPath = pathSync.join(mockCodexRoot, 'mock-codex.js');
+    const mockCodexSource = [
+      "const fs = require('node:fs');",
+      "const readline = require('node:readline');",
+      "const args = process.argv.slice(2);",
+      "if (args[0] === '--version') {",
+      "  process.stdout.write('codex-cli 0.170.0\\n');",
+      "  process.exit(0);",
+      "}",
+      "const sawApiKey = Boolean(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY);",
+      "const rl = readline.createInterface({ input: process.stdin });",
+      "rl.on('line', (line) => {",
+      "  if (!line.trim()) return;",
+      "  const msg = JSON.parse(line);",
+      "  if (msg.method === 'initialize') {",
+      "    process.stdout.write(JSON.stringify({ id: msg.id, result: { userAgent: 'codex/0.170.0' } }) + '\\n');",
+      "  } else if (msg.method === 'account/read') {",
+      "    process.stdout.write(JSON.stringify({ id: msg.id, result: { account: sawApiKey ? { type: 'apiKey' } : { type: 'chatgpt', email: 'sub@example.com', planType: 'pro' }, requiresOpenaiAuth: true } }) + '\\n');",
+      "  } else if (msg.method === 'model/list') {",
+      "    process.stdout.write(JSON.stringify({ id: msg.id, result: { data: [{ id: 'gpt-6.2-sol', model: 'gpt-6.2-sol', displayName: 'gpt-6.2-sol', defaultReasoningEffort: 'high', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low', description: 'Fast' }, { reasoningEffort: 'high', description: 'Thorough' }, { reasoningEffort: 'ultra', description: 'Maximum' }] }] } }) + '\\n');",
+      "  } else if (msg.method === 'account/logout') {",
+      "    process.stdout.write(JSON.stringify({ id: msg.id, result: {} }) + '\\n');",
+      "  } else if (msg.method === 'thread/start') {",
+      "    process.stdout.write(JSON.stringify({ id: msg.id, result: { thread: { id: 'codex-thread-1' } } }) + '\\n');",
+      "  } else if (msg.method === 'turn/start') {",
+      "    process.stdout.write(JSON.stringify({ id: msg.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } }) + '\\n');",
+      "    const txt = String(msg.params?.input?.[0]?.text || '');",
+      "    if (txt.includes('Edit codex')) {",
+      "      process.stdout.write(JSON.stringify({ method: 'item/started', params: { threadId: 'codex-thread-1', turnId: 'turn-1', item: { type: 'fileChange', id: 'fc-w1', changes: [{ path: " + JSON.stringify(mockCodexFile) + ", kind: { type: 'update' } }, { path: " + JSON.stringify(mockCodexOutside) + ", kind: { type: 'create' } }] } } }) + '\\n');",
+      "      setTimeout(() => {",
+      "        fs.writeFileSync(" + JSON.stringify(mockCodexFile) + ", 'export const c = 2;\\n', 'utf8');",
+      "        fs.writeFileSync(" + JSON.stringify(mockCodexOutside) + ", '# out', 'utf8');",
+      "        process.stdout.write(JSON.stringify({ method: 'item/completed', params: { threadId: 'codex-thread-1', turnId: 'turn-1', item: { type: 'fileChange', id: 'fc-w1', status: 'completed', changes: [{ path: " + JSON.stringify(mockCodexFile) + ", kind: { type: 'update' } }, { path: " + JSON.stringify(mockCodexOutside) + ", kind: { type: 'create' } }] } } }) + '\\n');",
+      "        process.stdout.write(JSON.stringify({ method: 'item/agentMessage/delta', params: { threadId: 'codex-thread-1', turnId: 'turn-1', itemId: 'msg-1', delta: 'pid:' + process.pid } }) + '\\n');",
+      "        process.stdout.write(JSON.stringify({ method: 'turn/completed', params: { threadId: 'codex-thread-1', turn: { id: 'turn-1', status: 'completed', items: [] } } }) + '\\n');",
+      "      }, 25);",
+      "    } else {",
+      "      process.stdout.write(JSON.stringify({ method: 'item/agentMessage/delta', params: { threadId: 'codex-thread-1', turnId: 'turn-1', itemId: 'msg-2', delta: 'pid:' + process.pid + ':' + txt + ':eff=' + String(msg.params?.effort || '') } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ method: 'turn/completed', params: { threadId: 'codex-thread-1', turn: { id: 'turn-1', status: 'completed', items: [] } } }) + '\\n');",
+      "    }",
+      "  }",
+      "});",
+    ].join('\n');
+    fsSync.writeFileSync(mockCodexPath, mockCodexSource, 'utf8');
+    process.env.WIDE_CODEX_PATH = mockCodexPath;
+    process.env.OPENAI_API_KEY = 'sk-should-be-stripped-by-wide';
+
+    const ccSrcForHelpers = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '50-ai-claude-code.js'), 'utf8');
+    const h1 = ccSrcForHelpers.indexOf('function claudeCodeExtractUserMessagePayload');
+    const h2 = ccSrcForHelpers.indexOf('function claudeCodeBuildAppendSystemPrompt');
+    const codexSrc = fsSync.readFileSync(pathSync.join(ROOT, 'apps', 'backend', 'src', '50-ai-codex.js'), 'utf8');
+    const codexMeta = new Map();
+    const codexHandlers = new Map();
+    codexCtx = vm.createContext({
+      require,
+      process,
+      console,
+      Buffer,
+      setTimeout,
+      clearTimeout,
+      __dirname: pathSync.join(ROOT, 'apps', 'backend'),
+      electron: { ipcMain: { handle: (ch, fn) => codexHandlers.set(ch, fn) } },
+      node_path: pathSync,
+      promises: fsSync.promises,
+      node_fs: fsSync,
+      node_child_process: require('node:child_process'),
+      node_crypto: require('node:crypto'),
+      node_os: os,
+      node_http: require('node:http'),
+      __wideTs: tsModules,
+      readAiConfig: async () => ({ codexEffort: 'high' }),
+      getAiSessionCodexMeta: async (id) => codexMeta.get(id) || { codexThreadId: '', codexSyncedCount: 0 },
+      setAiSessionCodexMeta: async (id, meta) => {
+        const cur = codexMeta.get(id) || { codexThreadId: '', codexSyncedCount: 0 };
+        codexMeta.set(id, { ...cur, ...meta });
+      },
+      AI_TOOLS: allToolSpecs,
+      aiRunTool: async () => 'mock_codex_mcp_ok',
+      aiResolvePath: (root, rel) => {
+        const target = pathSync.resolve(root, String(rel || ''));
+        const normRoot = pathSync.resolve(root);
+        if (target.startsWith(pathSync.join(normRoot, 'outside'))) {
+          return { error: 'Outside workspace' };
+        }
+        if (target === normRoot || target.startsWith(normRoot + pathSync.sep)) {
+          return { path: target, relative: pathSync.relative(normRoot, target) };
+        }
+        return { error: 'Outside workspace' };
+      },
+      aiDiffCounts: (before, after) => ({
+        added: before === after ? 0 : 1,
+        removed: before === after ? 0 : 1,
+      }),
+      aiVerifyEditedFile: async (_root, resolvedPath, relPath, _content, _staged, send) => {
+        send({ type: 'verification', path: resolvedPath, relativePath: relPath, ok: true, errors: 0, warnings: 0, diagnostics: [] });
+        return { ok: true, errors: 0, warnings: 0 };
+      },
+    });
+    vm.runInContext(`${ccSrcForHelpers.slice(h1, h2)}\n${codexSrc}`, codexCtx, { filename: '50-ai-codex.js' });
+    codexCtx.registerCodexHandlers();
+
+    const codexStatus = await codexHandlers.get('ai:codexStatus')({ force: true });
+    const cEvList1 = [];
+    const cr1 = await codexCtx.aiRunCodexTurn({
+      root: mockCodexRoot,
+      sessionId: 'codex-smoke-sess',
+      model: 'gpt-6.2-sol',
+      effort: 'ultra',
+      messages: [{ role: 'user', content: 'Edit codex' }],
+      allowWrites: true,
+      toolMode: 'full',
+      send: (ev) => cEvList1.push(ev),
+    });
+    const cEvList2 = [];
+    const cr2 = await codexCtx.aiRunCodexTurn({
+      root: mockCodexRoot,
+      sessionId: 'codex-smoke-sess',
+      model: 'gpt-6.2-sol',
+      effort: 'ultra',
+      messages: [
+        { role: 'user', content: 'Edit codex' },
+        { role: 'assistant', content: 'done' },
+        { role: 'user', content: 'turn_two' },
+      ],
+      allowWrites: true,
+      toolMode: 'full',
+      send: (ev) => cEvList2.push(ev),
+    });
+    await codexHandlers.get('ai:codexLogout')();
+
+    const ct1 = cEvList1.filter((e) => e.type === 'text').map((e) => e.text).join('');
+    const ct2 = cEvList2.filter((e) => e.type === 'text').map((e) => e.text).join('');
+    const cpid1 = ct1.startsWith('pid:') ? ct1.slice(4) : '';
+    const cpid2Match = /^pid:(\d+):turn_two:eff=ultra$/.exec(ct2);
+    const codexEdits = cEvList1.filter((e) => e.type === 'edit');
+    const codexVer = cEvList1.find((e) => e.type === 'verification');
+
+    report(
+      codexStatus?.installed === true &&
+        codexStatus?.signedIn === true &&
+        codexStatus?.planType === 'pro' &&
+        codexStatus?.models?.[0]?.id === 'gpt-6.2-sol' &&
+        cr1?.ok === true &&
+        cr2?.ok === true &&
+        Boolean(cpid1) &&
+        cpid2Match?.[1] === cpid1 &&
+        codexEdits.length === 1 &&
+        codexEdits[0].path === mockCodexFile &&
+        codexEdits[0].staged === false &&
+        codexEdits[0].oldContent === 'export const c = 1;\n' &&
+        codexEdits[0].content === 'export const c = 2;\n' &&
+        codexVer?.ok === true &&
+        codexMeta.get('codex-smoke-sess')?.codexThreadId === 'codex-thread-1',
+      'Persistent Codex worker strips OPENAI_API_KEY, enforces ChatGPT OAuth, reuses warm PID, snapshots fileChange diffs, and verifies post-edit',
+    );
+  } finally {
+    if (codexCtx && typeof codexCtx.codexStopAll === 'function') {
+      try { codexCtx.codexStopAll(); } catch {}
+    }
+    if (prevWideCodexPath === undefined) delete process.env.WIDE_CODEX_PATH;
+    else process.env.WIDE_CODEX_PATH = prevWideCodexPath;
+    if (prevOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = prevOpenAiKey;
+    try { fsSync.rmSync(mockCodexRoot, { recursive: true, force: true }); } catch {}
+  }
+
+  return failed;
+}
+
+async function checkReconCoreEngine() {
+  const httpSync = require('node:http');
+  let failed = 0;
+  const report = (pass, what) => {
+    if (!pass) failed += 1;
+    console.log(`${pass ? 'ok  ' : 'FAIL'} ${what}`);
+  };
+
+  const statusRes = (await invoke('recon:status', [])).result;
+  report(statusRes?.ok === true && Array.isArray(statusRes.engines) && statusRes.engines.includes('node-ts'), 'recon:status reports initialized engines');
+
+  const normRes = (await invoke('recon:normalizePaths', [[
+    'https://app.test/users/42',
+    'https://app.test/items/alpha',
+    'https://app.test/items/beta',
+    'https://app.test/items/gamma',
+  ], 2])).result;
+  report(
+    Array.isArray(normRes?.fingerprints) &&
+      normRes.fingerprints[0] === 'https://app.test/users/{num}' &&
+      normRes.fingerprints[3] === 'https://app.test/items/{param}',
+    'recon:normalizePaths collapses numeric IDs and high-cardinality PathTrie segments',
+  );
+
+  const ssrfBlock = (await invoke('recon:checkScope', [{ url: 'http://169.254.169.254/latest/meta-data/', rootHostname: 'example.com', fieldScope: 'rdn', allowPrivate: false }])).result;
+  const v6Block = (await invoke('recon:checkScope', [{ url: 'http://[::1]/admin', rootHostname: 'example.com', fieldScope: 'rdn', allowPrivate: false }])).result;
+  const rdnAllow = (await invoke('recon:checkScope', [{ url: 'https://api.example.com/v1', rootHostname: 'www.example.com', fieldScope: 'rdn', allowPrivate: false }])).result;
+  const evilBlock = (await invoke('recon:checkScope', [{ url: 'https://evil.org/', rootHostname: 'www.example.com', fieldScope: 'rdn', allowPrivate: false }])).result;
+  report(
+    ssrfBlock?.allowed === false &&
+      ssrfBlock?.internalHost === true &&
+      v6Block?.allowed === false &&
+      rdnAllow?.allowed === true &&
+      evilBlock?.allowed === false,
+    'recon:checkScope enforces SSRF NetworkPolicy and RDN/FQDN DNS scope',
+  );
+
+  const h = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9';
+  const p = 'eyJzdWIiOiJ1c2VyLTEiLCJpc3MiOiJ3aWRlIn0';
+  const validGKey = ['AIza', 'SyD1234567890abcdefghijklmnopqrstuv'].join('');
+  const auditRes = (await invoke('recon:auditResponse', [{
+    url: 'https://app.example.com/api/v1/items',
+    method: 'POST',
+    headers: { server: 'nginx/1.25', 'content-type': 'application/json' },
+    reqContentType: 'application/json',
+    body: `<div data-reactroot>api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" token="${validGKey}" auth="Bearer ${h}.${p}.sig"</div>`,
+    extractLinks: true,
+  }])).result;
+  report(
+    auditRes?.ok === true &&
+      auditRes.audit?.endpointClass === 'rest' &&
+      auditRes.audit?.technologies?.includes('Nginx') &&
+      auditRes.audit?.technologies?.includes('React') &&
+      auditRes.audit?.jwtTokens?.length === 1 &&
+      auditRes.audit?.jwtTokens?.[0]?.payload?.iss === 'wide' &&
+      auditRes.audit?.secrets?.length === 1 &&
+      auditRes.audit?.secrets?.[0]?.ruleId === 'google-api-key',
+    'recon:auditResponse runs security headers, JWT decode, entropy-filtered secrets, REST classification, and tech detection',
+  );
+
+  const ssrfReplay = (await invoke('proxy:replay', [{ method: 'GET', url: 'http://127.0.0.1:9/test', headers: [], body: '' }, { allowPrivate: false }])).result;
+  report(ssrfReplay?.ok === false && String(ssrfReplay?.error || '').includes('SSRF'), 'proxy:replay blocks loopback requests when allowPrivate is false');
+
+  const srv = httpSync.createServer((req, res) => {
+    const reqUrl = req.url || '/';
+    if (reqUrl === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html', Server: 'Nginx' });
+      res.end('<html><head><title>Home</title></head><body><a href="/login">Login</a><script>fetch("/api/users");</script></body></html>');
+      return;
+    }
+    if (reqUrl === '/login') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end('<html><head><title>Login</title></head><body><form action="/session" method="POST"><input name="user" type="text"></form></body></html>');
+      return;
+    }
+    if (reqUrl === '/api/users') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"users":[]}');
+      return;
+    }
+    if (reqUrl === '/robots.txt') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('User-agent: *\nAllow: /\n');
+      return;
+    }
+    res.writeHead(404);
+    res.end('not found');
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const port = srv.address().port;
+    const crawlRes = (await invoke('recon:crawlStart', [{
+      seeds: [`http://127.0.0.1:${port}/`],
+      maxDepth: 2,
+      maxPages: 12,
+      probePaths: false,
+      allowPrivate: true,
+    }])).result;
+    report(
+      crawlRes?.ok === true &&
+        Number(crawlRes.visited || 0) >= 3 &&
+        Boolean(crawlRes.graph?.nodes?.length >= 2),
+      'recon:crawlStart crawls local target, discovers links/forms/JS APIs, and builds StateGraph',
+    );
+  } finally {
+    await new Promise((r) => srv.close(r));
+  }
+
+  const pathLocal = require('node:path');
+  const tsInspect = require(pathLocal.join(__dirname, '..', 'out', 'main', 'backend-modules.cjs'));
+  report(
+    tsInspect.detectSqli("1' OR '1'='1").sqli === true &&
+      tsInspect.detectXss('<s\x00cript>alert(1)</script>').xss === true &&
+      tsInspect.hasNestedQuantifiers('(a+)+$') === true,
+    'backend-modules lexical SQLi/XSS and nested-quantifier ReDoS detection work as expected',
+  );
+
+  const safeProg = tsInspect.compileSafePattern('^(a+)+c$', '');
+  const tNfaStart = Date.now();
+  const safeHit = tsInspect.matchSafePattern(safeProg, `${'a'.repeat(2000)}!`);
+  report(
+    safeHit === false && Date.now() - tNfaStart < 250,
+    'Thompson NFA matcher completes linear-time on adversarial backtracking input',
+  );
+
+  const redosRuleRes = (await invoke('security:testRule', ['(a+)+$', '', 'aaaaaaaaaa!'])).result;
+  const nfaRuleRes = (await invoke('security:testRule', ['^SELECT\\s+\\*', 'i', 'SELECT * FROM users\nother'])).result;
+  report(
+    redosRuleRes?.ok === false &&
+      nfaRuleRes?.ok === true &&
+      nfaRuleRes?.engine === 'nfa' &&
+      Array.isArray(nfaRuleRes?.matches) &&
+      nfaRuleRes.matches.length === 1,
+    'security:testRule rejects ReDoS patterns and executes safe regex via linear Thompson NFA',
+  );
+
+  const inspectTestUrl = "https://app.example.com/search?q=1%27%20UNION%20SELECT%201,2--%u0027";
+  const inspectTrafficRes = (await invoke('proxy:inspectTraffic', [
+    {
+      url: inspectTestUrl,
+      method: 'GET',
+      reqHeaders: [['Host', 'app.example.com']],
+      reqBody: '',
+    },
+    { learning: true, today: '2026-11-19' },
+  ])).result;
+  report(
+    inspectTrafficRes?.ok === true &&
+      inspectTrafficRes?.scores?.sql >= 8 &&
+      inspectTrafficRes?.action === 'log' &&
+      inspectTrafficRes?.signals?.percentUEscape === true &&
+      Array.isArray(inspectTrafficRes?.drafts) &&
+      inspectTrafficRes.drafts.length > 0,
+    'proxy:inspectTraffic scores SQLi + evasion and emits learning exception drafts',
+  );
+
+  const firstHitIds = (inspectTrafficRes?.hits || []).map((h) => h.ruleId);
+  const suppressedInspect = (await invoke('proxy:inspectTraffic', [
+    {
+      url: inspectTestUrl,
+      method: 'GET',
+      reqHeaders: [['Host', 'app.example.com']],
+      reqBody: '',
+    },
+    {
+      today: '2026-11-19',
+      exceptions: [{ ruleIds: firstHitIds, pathPrefix: '/search', adjustments: { sql: -50, xss: -50 }, until: '2099-12-31' }],
+    },
+  ])).result;
+  const expiredInspect = (await invoke('proxy:inspectTraffic', [
+    {
+      url: inspectTestUrl,
+      method: 'GET',
+      reqHeaders: [['Host', 'app.example.com']],
+      reqBody: '',
+    },
+    {
+      today: '2026-11-19',
+      exceptions: [{ ruleIds: firstHitIds, pathPrefix: '/search', adjustments: { sql: -50, xss: -50 }, until: '2020-01-01' }],
+    },
+  ])).result;
+  report(
+    suppressedInspect?.ok === true &&
+      suppressedInspect?.action === 'pass' &&
+      Number(suppressedInspect?.suppressed || 0) > 0 &&
+      Number(expiredInspect?.expiredExceptions || 0) > 0 &&
+      Number(expiredInspect?.scores?.sql || 0) >= 8,
+    'proxy:inspectTraffic honors active dated exceptions and rejects expired until dates',
+  );
+
+  const inspectReportRes = (await invoke('proxy:inspectReport', [{
+    learning: true,
+    entries: [{
+      id: 77,
+      url: "https://app.example.com/items?id=1' UNION SELECT 1,2--",
+      method: 'GET',
+      reqHeaders: [['Host', 'app.example.com']],
+      reqBody: '',
+    }],
+  }])).result;
+  report(
+    inspectReportRes?.ok === true &&
+      Array.isArray(inspectReportRes?.results) &&
+      inspectReportRes.results.length >= 1 &&
+      Array.isArray(inspectReportRes?.drafts) &&
+      inspectReportRes.drafts.length >= 1,
+    'proxy:inspectReport inspects batch proxy entries and aggregates exception drafts',
+  );
+
+  const smuggleRes = (await invoke('proxy:testSmuggling', [{
+    method: 'GET',
+    rawRequest: "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+    rawResponse: "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nokHTTP/1.1 200 OK\r\n\r\npoison",
+  }])).result;
+  report(
+    smuggleRes?.ok === true &&
+      smuggleRes?.requestReport?.ok === false &&
+      smuggleRes?.requestReport?.error === 'AmbiguousFraming' &&
+      smuggleRes?.responseReport?.ok === false &&
+      Array.isArray(smuggleRes?.responseReport?.poisoningVectors) &&
+      smuggleRes.responseReport.poisoningVectors.length > 0,
+    'proxy:testSmuggling flags RFC 9112 CL+TE request smuggling and response poisoning',
+  );
+
+  const sampleArticleHtml = `
+    <html><head>
+      <title>Ignored Site Title</title>
+      <meta property="og:title" content="Deep Engine Article">
+      <meta name="author" content="Wide Research">
+      <meta property="article:published_time" content="2026-11-19">
+      <meta name="keywords" content="security, resilience, http">
+    </head><body>
+      <nav>Menu Home Login Signup</nav>
+      <article>
+        <h1>Deep Engine Article</h1>
+        <p>First important paragraph with &amp; clean prose that exceeds minimum length threshold easily.</p>
+        <p>Second detailed technical paragraph describing extraction without navigation clutter.</p>
+        <img src="/assets/diagram.png">
+      </article>
+      <footer>Copyright Boilerplate Footer</footer>
+    </body></html>`;
+  const art = tsInspect.extractArticleFromHtml(sampleArticleHtml, 'https://example.org/post/1');
+  report(
+    art.title === 'Deep Engine Article' &&
+      art.author === 'Wide Research' &&
+      art.date === '2026-11-19' &&
+      art.cleanText.includes('First important paragraph with & clean prose') &&
+      !art.cleanText.includes('Menu Home Login') &&
+      !art.cleanText.includes('Copyright Boilerplate Footer') &&
+      art.allImages.includes('https://example.org/assets/diagram.png'),
+    'extractArticleFromHtml extracts clean article body, metadata, and resolved images without boilerplate',
+  );
+
+  report(
+    tsInspect.shouldBlockFastReadRequest('image', 'https://cdn.example.org/a.png') === true &&
+      tsInspect.shouldBlockFastReadRequest('font', 'https://cdn.example.org/a.woff2') === true &&
+      tsInspect.shouldBlockFastReadRequest('script', 'https://www.google-analytics.com/analytics.js') === true &&
+      tsInspect.shouldBlockFastReadRequest('document', 'https://example.org/news') === false,
+    'shouldBlockFastReadRequest blocks images, fonts, and trackers while allowing documents',
+  );
+
+  const zlibLocal = require('node:zlib');
+  const fsLocal = require('node:fs');
+  const osLocal = require('node:os');
+  const makeZipDocx = (xmlContent) => {
+    const nameBuf = Buffer.from('word/document.xml', 'utf8');
+    const compData = zlibLocal.deflateRawSync(Buffer.from(xmlContent, 'utf8'));
+    const lf = Buffer.alloc(30);
+    lf.writeUInt32LE(0x04034b50, 0);
+    lf.writeUInt16LE(20, 4);
+    lf.writeUInt16LE(8, 8);
+    lf.writeUInt32LE(compData.length, 18);
+    lf.writeUInt32LE(Buffer.byteLength(xmlContent, 'utf8'), 22);
+    lf.writeUInt16LE(nameBuf.length, 26);
+    const lfFull = Buffer.concat([lf, nameBuf, compData]);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(8, 10);
+    cd.writeUInt32LE(compData.length, 20);
+    cd.writeUInt32LE(Buffer.byteLength(xmlContent, 'utf8'), 24);
+    cd.writeUInt16LE(nameBuf.length, 28);
+    cd.writeUInt32LE(0, 42);
+    const cdFull = Buffer.concat([cd, nameBuf]);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(1, 8);
+    eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(cdFull.length, 12);
+    eocd.writeUInt32LE(lfFull.length, 16);
+    return Buffer.concat([lfFull, cdFull, eocd]);
+  };
+  const docxBuf = makeZipDocx(
+    '<w:document><w:body><w:p><w:r><w:t>First &amp; Second</w:t></w:r></w:p><w:p><w:r><w:t>Third Line</w:t></w:r></w:p></w:body></w:document>',
+  );
+  const docxParsed = tsInspect.extractDocxText(docxBuf);
+  const docxTmp = pathLocal.join(ROOT, `wide-smoke-${Date.now()}.docx`);
+  fsLocal.writeFileSync(docxTmp, docxBuf);
+  let fsDocxReply = null;
+  try {
+    await invoke('dialog:openFolder', []);
+    fsDocxReply = await invoke('fs:readFile', [docxTmp]);
+  } finally {
+    try { fsLocal.rmSync(docxTmp, { force: true }); } catch {}
+  }
+  const fsDocxRes = fsDocxReply?.result;
+  report(
+    docxParsed.ok === true &&
+      docxParsed.text === 'First & Second\nThird Line' &&
+      docxParsed.paragraphs === 2 &&
+      fsDocxRes?.format === 'docx' &&
+      fsDocxRes?.content === 'First & Second\nThird Line',
+    `zero-dependency extractDocxText and fs:readFile decode DEFLATE ZIP/DOCX paragraphs cleanly${fsDocxReply?.error ? ` (${fsDocxReply.error})` : ''}`,
+  );
+
+  const credCheck = tsInspect.checkUrlSecurity('https://user:pass@example.com/resource');
+  const redirSsrf = tsInspect.validateRedirectChain(
+    ['https://example.com/start', 'http://169.254.169.254/latest/meta-data/'],
+    { allowPrivate: false, maxRedirects: 5 },
+  );
+  const redirTooLong = tsInspect.validateRedirectChain(
+    Array.from({ length: 7 }, (_, i) => `https://example.com/h${i}`),
+    { maxRedirects: 5 },
+  );
+  report(
+    credCheck.allowed === false &&
+      redirSsrf.allowed === false &&
+      redirTooLong.allowed === false,
+    'URL security guard rejects embedded credentials, SSRF redirect hops, and >5 redirect chains',
+  );
+
+  const brk = new tsInspect.CircuitBreaker({ failureThreshold: 3, initialCooldownMs: 50, maxCooldownMs: 200 });
+  report(brk.canTry(1000) === true && brk.state === 'CLOSED', 'CircuitBreaker starts CLOSED');
+  brk.onBlocked(1000);
+  brk.onBlocked(1010);
+  brk.onBlocked(1020);
+  const openBlocked = brk.state === 'OPEN' && brk.canTry(1030) === false;
+  const halfOpenTry = brk.canTry(1080) === true && brk.state === 'HALF_OPEN';
+  brk.onSuccess();
+  report(
+    openBlocked && halfOpenTry && brk.state === 'CLOSED' && brk.cooldownMs === 50,
+    'CircuitBreaker transitions cleanly across CLOSED -> OPEN -> HALF_OPEN -> CLOSED',
+  );
+
+  const agentPool = new tsInspect.AgentPool();
+  const a1 = agentPool.getAgent('https:', true, 'http://127.0.0.1:8888');
+  const a2 = agentPool.getAgent('https:', true, 'http://127.0.0.1:8888');
+  const jitterMs = tsInspect.computeJitterBackoffMs(2, 100, 50, () => 0.5);
+  const sameAgent = a1 === a2 && agentPool.size() === 1;
+  agentPool.closeAll();
+  report(
+    sameAgent && jitterMs === 425 && tsInspect.computeJitterBackoffMs(1, 100, 0, () => 0) === 200,
+    'AgentPool caches keep-alive/proxy agents and computeJitterBackoffMs applies exponential jitter',
+  );
+
+  const fastToggle1 = (await invoke('ai:browserNav', [{ action: 'toggle_fast_read' }])).result;
+  const fastToggle2 = (await invoke('ai:browserNav', [{ action: 'toggle_fast_read' }])).result;
+  report(
+    fastToggle1?.ok === true &&
+      fastToggle1?.session?.fastRead === true &&
+      fastToggle2?.session?.fastRead === false,
+    'ai:browserNav toggle_fast_read switches session fastRead state cleanly',
+  );
+
+  const credHttpRes = (await invoke('http:send', ['https://admin:secret@example.com/', 'GET', [], null, {}])).result;
+  const credProxyRes = (await invoke('proxy:replay', [{ method: 'GET', url: 'http://admin:secret@127.0.0.1:9/', headers: [], body: '' }, { allowPrivate: true }])).result;
+  report(
+    credHttpRes?.ok === false &&
+      String(credHttpRes?.error || '').includes('credentials') &&
+      credProxyRes?.ok === false &&
+      String(credProxyRes?.error || '').includes('credentials'),
+    'http:send and proxy:replay reject URLs carrying embedded user:pass@ credentials',
+  );
+
+  let transientHits = 0;
+  let blockedHits = 0;
+  const resSrv = httpSync.createServer((req, res) => {
+    const reqUrl = req.url || '/';
+    if (reqUrl === '/flaky') {
+      transientHits += 1;
+      if (transientHits <= 2) {
+        res.writeHead(429, { 'Content-Type': 'text/plain' });
+        res.end('rate limited');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('recovered');
+      return;
+    }
+    if (reqUrl === '/blocked') {
+      blockedHits += 1;
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('forbidden');
+      return;
+    }
+    res.writeHead(200);
+    res.end('ok');
+  });
+  await new Promise((r) => resSrv.listen(0, '127.0.0.1', r));
+  try {
+    const resPort = resSrv.address().port;
+    const flakyRes = (await invoke('http:send', [
+      `http://127.0.0.1:${resPort}/flaky`,
+      'GET',
+      [],
+      null,
+      { retries: 2, backoffBaseMs: 15, backoffJitterMs: 10 },
+    ])).result;
+    report(
+      flakyRes?.ok === true && flakyRes?.status === 200 && flakyRes?.body === 'recovered' && transientHits === 3,
+      'http:send retries 429 transient failures with jitter backoff and recovers',
+    );
+
+    const blkUrl = `http://127.0.0.1:${resPort}/blocked`;
+    await invoke('http:send', [blkUrl, 'GET', [], null, { useBreaker: true }]);
+    await invoke('http:send', [blkUrl, 'GET', [], null, { useBreaker: true }]);
+    await invoke('http:send', [blkUrl, 'GET', [], null, { useBreaker: true }]);
+    const openCircuitRes = (await invoke('http:send', [blkUrl, 'GET', [], null, { useBreaker: true }])).result;
+    report(
+      blockedHits === 3 &&
+        openCircuitRes?.ok === false &&
+        openCircuitRes?.circuitState === 'OPEN',
+      'http:send opens per-host circuit breaker after 3 consecutive 403 blocks without extra network call',
+    );
+  } finally {
+    await new Promise((r) => resSrv.close(r));
+  }
+
+  const playbookText = tsInspect.aiBuildWideCapabilityPlaybook({
+    allowWrites: true,
+    toolMode: 'full',
+    allowBrowser: true,
+    isExternalCli: true,
+  });
+  report(
+    playbookText.includes('Wide Ecosystem Capability Playbook') &&
+      playbookText.includes('read_document') &&
+      playbookText.includes('fastRead=true') &&
+      playbookText.includes("mode='article'") &&
+      playbookText.includes('crawl_target') &&
+      playbookText.includes('inspect_http_message') &&
+      playbookText.includes('useBreaker=true'),
+    'aiBuildWideCapabilityPlaybook emits complete Wide capability guidance for Cloud and local agents',
+  );
+
+  const toolsSrc = fsLocal.readFileSync(pathLocal.join(ROOT, 'apps', 'backend', 'src', '44-ai-0-tools.js'), 'utf8');
+  const toolsVm = { __wideTs: tsInspect };
+  require('node:vm').runInNewContext(`${toolsSrc}\nglobalThis.__allTools = AI_TOOLS;`, toolsVm);
+  const mcpFilteredFull = tsInspect.aiFilterToolsForClaudeMcp(toolsVm.__allTools, {
+    allowWrites: true,
+    toolMode: 'full',
+    allowBrowser: true,
+  });
+  const mcpFilteredCode = tsInspect.aiFilterToolsForClaudeMcp(toolsVm.__allTools, {
+    allowWrites: true,
+    toolMode: 'code',
+    allowBrowser: false,
+  });
+  const mcpNamesFull = mcpFilteredFull.map((t) => t.name);
+  const mcpNamesCode = mcpFilteredCode.map((t) => t.name);
+  const inspectToolSpec = mcpFilteredFull.find((t) => t.name === 'inspect_http_message');
+  const crawlToolSpec = mcpFilteredFull.find((t) => t.name === 'crawl_target');
+  const readDocSpec = mcpFilteredFull.find((t) => t.name === 'read_document');
+  report(
+    mcpNamesFull.includes('read_document') &&
+      mcpNamesFull.includes('crawl_target') &&
+      mcpNamesFull.includes('inspect_http_message') &&
+      mcpNamesCode.includes('read_document') &&
+      !mcpNamesCode.includes('crawl_target') &&
+      Boolean(inspectToolSpec?.parameters?.properties?.learning) &&
+      Boolean(crawlToolSpec?.parameters?.properties?.fieldScope) &&
+      Boolean(readDocSpec?.parameters?.properties?.path),
+    'Cloud MCP tool filter exposes read_document, crawl_target, and inspect_http_message with full parameter schemas',
+  );
+
+  const vCrawl = toolsVm.aiValidateToolCall('crawl_target', { url: 'https://example.com', maxDepth: 2, allowPrivate: false });
+  const vInspect = toolsVm.aiValidateToolCall('inspect_http_message', { url: 'https://example.com/?q=1', learning: true });
+  const vDoc = toolsVm.aiValidateToolCall('read_document', { path: 'spec.docx' });
+  const vExt = toolsVm.aiValidateToolCall('browser_extract', { mode: 'article', cleanText: true });
+  const vOpen = toolsVm.aiValidateToolCall('browser_open', { url: 'https://example.com', fastRead: true });
+  const vHttp = toolsVm.aiValidateToolCall('send_http_request', { url: 'https://example.com', retries: 2, useBreaker: true });
+  report(
+    vCrawl.ok === true &&
+      vInspect.ok === true &&
+      vDoc.ok === true &&
+      vExt.ok === true &&
+      vOpen.ok === true &&
+      vHttp.ok === true,
+    'aiValidateToolCall accepts new crawl_target, inspect_http_message, read_document, fastRead, article, and resilient HTTP schemas',
+  );
 
   return failed;
 }

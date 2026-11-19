@@ -13,14 +13,16 @@ if (!fs.existsSync(RELEASE)) {
   fs.mkdirSync(RELEASE, { recursive: true });
 }
 
+const PKG_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version || '0.6191126';
+
 console.log('Packing tar.gz...');
-const tarGzName = 'wide-0.4141126-linux-x64.tar.gz';
+const tarGzName = `wide-${PKG_VERSION}-linux-x64.tar.gz`;
 const tarGzPath = path.join(DIST, tarGzName);
 cp.execSync(`tar -czf "${tarGzPath}" -C "${DIST}" wide-linux-x64`, { stdio: 'inherit' });
 fs.copyFileSync(tarGzPath, path.join(RELEASE, tarGzName));
 
 console.log('Packing tar.zst...');
-const tarZstName = 'wide-0.4141126-linux-x64.tar.zst';
+const tarZstName = `wide-${PKG_VERSION}-linux-x64.tar.zst`;
 const tempTar = path.join(DIST, 'temp-wide-linux.tar');
 const tarZstPath = path.join(DIST, tarZstName);
 cp.execSync(`tar -cf "${tempTar}" -C "${DIST}" wide-linux-x64`, { stdio: 'inherit' });

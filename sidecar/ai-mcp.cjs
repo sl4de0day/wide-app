@@ -59,11 +59,16 @@ function httpRequest(method, path, payload, timeoutMs = 120000) {
 async function fetchBridgeTools() {
   try {
     const reply = await httpRequest("GET", "/tools", undefined, 5000);
-    if (reply.status === 200 && Array.isArray(reply.json?.tools) && reply.json.tools.length > 0) {
+    if (reply.status === 200 && Array.isArray(reply.json?.tools)) {
       cachedTools = reply.json.tools.map((t) => ({
         name: String(t.name),
         description: String(t.description || ""),
-        inputSchema: t.inputSchema && typeof t.inputSchema === "object" ? t.inputSchema : { type: "object", properties: {} },
+        inputSchema:
+          t.inputSchema && typeof t.inputSchema === "object"
+            ? t.inputSchema
+            : t.parameters && typeof t.parameters === "object"
+              ? t.parameters
+              : { type: "object", properties: {} },
       }));
     }
   } catch {

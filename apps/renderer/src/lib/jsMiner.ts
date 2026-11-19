@@ -2,6 +2,15 @@ export interface MinerSecret {
   kind: string;
   value: string;
   line: number;
+  entropy?: number;
+  jwtClaims?: {
+    alg: string;
+    iss?: string;
+    sub?: string;
+    exp?: number;
+    expired?: boolean;
+    algNone?: boolean;
+  };
 }
 
 export interface MinerDependency {
@@ -40,7 +49,48 @@ const SECRET_RULES: { kind: string; regex: RegExp }[] = [
 const ENDPOINT_RULES: RegExp[] = [
   /["'`]((?:https?:)?\/\/[a-zA-Z0-9.\-_]+(?::\d+)?(?:\/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?)["'`]/g,
   /["'`](\/[a-zA-Z0-9._-]+(?:\/[a-zA-Z0-9._~:?#[\]@!$&'()*+,;=%-]*)*)["'`]/g,
+  /fetch\s*\(\s*["'`]([^"'`${}\s]+)["'`]/g,
+  /\.(?:get|post|put|delete|patch|head|options)\s*\(\s*["'`]([^"'`${}\s]+)["'`]/g,
+  /\.open\s*\(\s*["'`][A-Za-z]+["'`]\s*,\s*["'`]([^"'`${}\s]+)["'`]/g,
+  /(?:url|uri|endpoint|baseURL|baseUrl|path|action)\s*:\s*["'`]((?:https?:\/\/|\/)[^"'`${}\s]+)["'`]/g,
 ];
+
+export function shannonEntropy(input: string): number {
+  if (!input) return 0;
+  const counts = new Map<string, number>();
+  for (const ch of input) counts.set(ch, (counts.get(ch) || 0) + 1);
+  let sum = 0;
+  for (const c of counts.values()) {
+    const p = c / input.length;
+    sum -= p * Math.log2(p);
+  }
+  return sum;
+}
+
+function decodeJwtSummary(token: string): MinerSecret["jwtClaims"] | undefined {
+  const parts = token.split(".");
+  if (parts.length !== 3) return undefined;
+  try {
+    const b64ToJson = (seg: string) => {
+      const padded = seg.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (seg.length % 4)) % 4);
+      return JSON.parse(atob(padded)) as Record<string, unknown>;
+    };
+    const header = b64ToJson(parts[0]);
+    const payload = b64ToJson(parts[1]);
+    const alg = typeof header.alg === "string" ? header.alg : "?";
+    const exp = typeof payload.exp === "number" ? payload.exp : undefined;
+    return {
+      alg,
+      iss: typeof payload.iss === "string" ? payload.iss : undefined,
+      sub: typeof payload.sub === "string" ? payload.sub : undefined,
+      exp,
+      expired: exp !== undefined && exp < Math.floor(Date.now() / 1000),
+      algNone: alg.toLowerCase() === "none",
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 const DEPENDENCY_RULES: { name: string; regex: RegExp }[] = [
   { name: "jQuery", regex: /jquery[.-]?v?(\d+\.\d+(?:\.\d+)?)/i },
@@ -86,10 +136,19 @@ export function mineJs(text: string): MinerResult {
     let match: RegExpExecArray | null;
     while ((match = rule.regex.exec(text))) {
       const value = match[1] ?? match[0];
+      const entropy = shannonEntropy(value);
+      if (rule.kind === "Generic API Key" && entropy < 3.5) continue;
       const key = `${rule.kind}:${value}`;
       if (secretSeen.has(key)) continue;
       secretSeen.add(key);
-      secrets.push({ kind: rule.kind, value, line: lineOf(text, match.index) });
+      const jwtClaims = rule.kind === "JSON Web Token" ? decodeJwtSummary(value) : undefined;
+      secrets.push({
+        kind: rule.kind,
+        value,
+        line: lineOf(text, match.index),
+        entropy: Number(entropy.toFixed(2)),
+        ...(jwtClaims ? { jwtClaims } : {}),
+      });
       if (secrets.length > 200) break;
     }
   }

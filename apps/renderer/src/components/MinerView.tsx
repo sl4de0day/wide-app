@@ -202,6 +202,15 @@ export function MinerView() {
                     </span>
                   </div>
                   <code className="block truncate font-mono text-[11px] text-fg" title={secret.value}>{secret.value}</code>
+                  {secret.jwtClaims && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-sky-300">
+                      <span>alg={secret.jwtClaims.alg}</span>
+                      {secret.jwtClaims.iss && <span>iss={secret.jwtClaims.iss}</span>}
+                      {secret.jwtClaims.sub && <span>sub={secret.jwtClaims.sub}</span>}
+                      {secret.jwtClaims.algNone && <span className="text-status-error">alg:none</span>}
+                      {secret.jwtClaims.expired && <span className="text-amber-400">expired</span>}
+                    </div>
+                  )}
                   <span className="block truncate text-[10px] text-fg-faint" title={secret.source}>{secret.source}</span>
                 </li>
               ))}

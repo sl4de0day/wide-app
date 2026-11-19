@@ -104,10 +104,10 @@ const AI_ASSISTANT: MarketplaceExtension = {
   removable: true,
   summary: "Ask a model about your code, in the cloud or on this machine",
   description:
-    "A chat panel that talks to a model about the project you have open. Cloud connects to Gemini, DeepSeek or Claude with a key you provide. Local runs the model on this machine through Ollama, which is installed for you if it is missing.\n\nWhichever you pick, the assistant gets the same five tools: list, read, search, open and rewrite. Each one goes through Wide's policy as the assistant rather than as you, and a rewrite lands in the editor instead of on the disk, so one undo takes it back.",
+    "A chat panel that talks to a model about the project you have open. Cloud connects through Claude Code, Google Antigravity, or OpenAI Codex. Local runs the model on this machine through Ollama, which is installed for you if it is missing.\n\nWhichever you pick, the assistant gets tools through Wide's policy and edits are verified automatically.",
   provides: [
     "Chat panel in the sidebar",
-    "Gemini, DeepSeek, Claude API, Claude Code",
+    "Claude Code, Google Antigravity, and OpenAI Codex",
     "Local models through Ollama",
     "Reads and edits the project, under policy",
   ],

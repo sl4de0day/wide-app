@@ -40,6 +40,14 @@ function registerFsHandlers() {
     if (stats.size > MAX_FILE_BYTES$1) {
       return { path: filePath, tooLarge: true, size: stats.size, content: "" };
     }
+    if (typeof __wideTs !== "undefined" && __wideTs?.isDocxPath?.(filePath) && __wideTs?.extractDocxText) {
+      const buf = await promises.readFile(filePath);
+      const parsed = __wideTs.extractDocxText(buf);
+      if (parsed.ok) {
+        return { path: filePath, tooLarge: false, size: stats.size, content: parsed.text, format: "docx" };
+      }
+      return { path: filePath, tooLarge: false, size: stats.size, content: "", error: parsed.error };
+    }
     const content = await promises.readFile(filePath, "utf8");
     return { path: filePath, tooLarge: false, size: stats.size, content };
   });

@@ -15,6 +15,32 @@ import { useScanner } from "@/stores/scanner";
 import { toast } from "@/stores/toast";
 import { useWorkspace } from "@/stores/workspace";
 import { openInBrowser } from "@/lib/browserActions";
+import { ClientPathTrie } from "@/lib/activeScan/crawler";
+
+function endpointBadgeForEntry(entry: ProxyEntry): "REST" | "GraphQL" | "SOAP" | "XHR" | null {
+  if (entry.endpointClass) {
+    const k = entry.endpointClass.toLowerCase();
+    if (k === "graphql") return "GraphQL";
+    if (k === "soap") return "SOAP";
+    if (k === "rest") return "REST";
+    if (k === "xhr") return "XHR";
+  }
+  const urlLower = (entry.url || "").toLowerCase();
+  const resCt = (entry.resHeaders || []).find(([k]) => k.toLowerCase() === "content-type")?.[1]?.toLowerCase() || "";
+  const reqCt = (entry.reqHeaders || []).find(([k]) => k.toLowerCase() === "content-type")?.[1]?.toLowerCase() || "";
+  if (urlLower.includes("/graphql") || reqCt.includes("application/graphql") || resCt.includes("application/graphql")) {
+    return "GraphQL";
+  }
+  if (reqCt.includes("soap+xml") || resCt.includes("soap+xml") || urlLower.endsWith(".wsdl") || urlLower.endsWith(".asmx")) {
+    return "SOAP";
+  }
+  const isJson = reqCt.includes("application/json") || resCt.includes("application/json");
+  const isApi = /(\/api\/|\/v\d+\/|\/rest\/|\/rpc\/)/.test(urlLower);
+  const mutating = entry.method === "POST" || entry.method === "PUT" || entry.method === "PATCH" || entry.method === "DELETE";
+  if (isJson && (mutating || isApi)) return "REST";
+  if (isJson && entry.method === "GET") return "XHR";
+  return null;
+}
 
 function statusTone(status: number): string {
   if (status >= 500 || status === 0) return "text-status-error";
@@ -76,12 +102,14 @@ function fillCounts(node: TreeNode): number {
   return total;
 }
 
-function buildTree(entries: ProxyEntry[]): TreeNode {
+function buildTree(entries: ProxyEntry[], collapseDynamic = false): TreeNode {
   const root = newNode("", "");
+  const trie = collapseDynamic ? new ClientPathTrie(5) : null;
   for (const entry of entries) {
     const { host, segments } = dissect(entry);
+    const activeSegments = trie ? trie.collapse(host, segments) : segments;
     let node = childOf(root, host);
-    for (const segment of segments) node = childOf(node, segment);
+    for (const segment of activeSegments) node = childOf(node, segment);
     node.entries.push(entry);
   }
   fillCounts(root);
@@ -201,6 +229,7 @@ function RequestRow({
     }
   })();
   const issues = useProxy((state) => state.issueCounts[entry.id]);
+  const epBadge = endpointBadgeForEntry(entry);
 
   return (
     <div
@@ -218,6 +247,11 @@ function RequestRow({
       <span className={cn("rounded-sm border px-1 py-0.2 font-mono text-[9px] font-semibold", methodBadgeColor(entry.method))}>
         {entry.method}
       </span>
+      {epBadge ? (
+        <span className="shrink-0 rounded-sm border border-sky-500/40 bg-sky-500/10 px-1 py-0.2 font-mono text-[9px] font-semibold text-sky-300">
+          {epBadge}
+        </span>
+      ) : null}
       <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-fg-faint">
         {path === "/" ? host : path}
       </span>
@@ -504,6 +538,7 @@ export function TargetPanel() {
   const entries = useProxy((state) => state.entries);
   const scope = useProxy((state) => state.scope);
   const [filterMode, setFilterMode] = useState<"all" | "scope" | "api" | "sensitive">("all");
+  const [collapseDynamic, setCollapseDynamic] = useState(false);
   const [search, setSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -555,7 +590,7 @@ export function TargetPanel() {
     });
   }, [entries, filterMode, search, scope]);
 
-  const tree = useMemo(() => buildTree(shown), [shown]);
+  const tree = useMemo(() => buildTree(shown, collapseDynamic), [shown, collapseDynamic]);
   const hosts = useMemo(() => [...tree.children.values()], [tree]);
 
   const toggle = (key: string) =>
@@ -725,6 +760,16 @@ export function TargetPanel() {
               {mode}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setCollapseDynamic((v) => !v)}
+            className={cn(
+              "rounded-sm border px-1.5 py-0.5 text-[10px] transition-colors duration-100",
+              collapseDynamic ? "border-accent bg-selected text-fg-bright font-medium" : "border-line text-fg-faint hover:bg-hover hover:text-fg",
+            )}
+          >
+            {t("Collapse Dynamic Paths")}
+          </button>
         </div>
       </div>
 

@@ -28,21 +28,9 @@ function aiLoadSdkVendor() {
   throw new Error(`ai-vendor.cjs is unavailable: ${String(lastError?.message || lastError || "not found")}`);
 }
 
-function aiCreateSdkModel({ provider, model, key }) {
+function aiCreateSdkModel({ provider, model }) {
   const sdk = aiLoadSdkVendor();
   const norm = String(provider || "").toLowerCase();
-  if (norm === "claude") {
-    const anthropic = sdk.createAnthropic({ apiKey: String(key || "") });
-    return anthropic(model || "claude-sonnet-4-5");
-  }
-  if (norm === "gemini") {
-    const google = sdk.createGoogleGenerativeAI({ apiKey: String(key || "") });
-    return google(model || "gemini-3.7-flash");
-  }
-  if (norm === "deepseek") {
-    const deepseek = sdk.createDeepSeek({ apiKey: String(key || "") });
-    return deepseek(model || "deepseek-v4-pro");
-  }
   if (norm === "local") {
     const ollama = sdk.createOpenAICompatible({
       name: "ollama",
@@ -61,38 +49,7 @@ function aiStableStringify(value) {
 }
 
 function aiCreateDoomLoopTracker() {
-  const callCounts = new Map();
-  let lastFailTool = "";
-  let consecutiveFailCount = 0;
-
-  return {
-    check(name, input) {
-      const sig = `${name}:${aiStableStringify(input ?? {})}`;
-      const hits = (callCounts.get(sig) || 0) + 1;
-      callCounts.set(sig, hits);
-      if (hits > 3) {
-        return `Circuit breaker triggered: "${name}" was already invoked ${hits - 1} times with identical parameters. Stop repeating this call, analyze what happened, change parameters or tool, or present current findings to the user.`;
-      }
-      if (lastFailTool === name && consecutiveFailCount >= 3) {
-        return `Circuit breaker triggered: "${name}" failed 3 times consecutively. Do not call "${name}" again in the same way; use another tool or inform the user concisely.`;
-      }
-      return null;
-    },
-    record(name, _input, resultText) {
-      const str = String(resultText ?? "");
-      const failed = /^(That tool failed:|Unknown tool|Missing required|Permission denied|Command blocked|Invalid |Navigation failed|Browser .* failed|Proxy .* failed|Replay failed|Intruder failed|Error:|exit [1-9])/i.test(str.trim());
-      if (failed) {
-        if (lastFailTool === name) consecutiveFailCount += 1;
-        else {
-          lastFailTool = name;
-          consecutiveFailCount = 1;
-        }
-      } else if (lastFailTool === name) {
-        lastFailTool = "";
-        consecutiveFailCount = 0;
-      }
-    },
-  };
+  return __wideTs.aiCreateDoomLoopTracker();
 }
 
 function aiEnsureObjectSchema(schema) {
@@ -140,36 +97,34 @@ function aiMessagesToSdk(messages) {
   return out;
 }
 
-function aiBuildSdkToolSet({ root, allowWrites, send, latestUserText, tracker, signal = null }) {
+function aiBuildSdkToolSet({ root, allowWrites, toolMode = "full", allowBrowser = true, turnContext = null, send, latestUserText, tracker, signal = null }) {
   const sdk = aiLoadSdkVendor();
-  const catalog = aiGetToolCatalog(allowWrites);
-  const mcpList = typeof mcpToolSpecs === "function" ? mcpToolSpecs() : [];
-  const allSpecs = [...catalog, ...mcpList];
+  const allSpecs = aiGetToolCatalog({ allowWrites, toolMode, allowBrowser });
   const toolSet = {};
 
   for (const spec of allSpecs) {
     if (!spec || !spec.name) continue;
     toolSet[spec.name] = sdk.tool({
       description: String(spec.description || spec.name),
-      inputSchema: sdk.jsonSchema(aiEnsureObjectSchema(spec.parameters)),
+      inputSchema: sdk.jsonSchema(aiEnsureObjectSchema(spec.parameters || spec.inputSchema)),
       execute: async (input, execOptions) => {
-        const norm = aiNormalizeToolCall(spec.name, input);
+        const rawInput = input && typeof input === "object" ? input : {};
         const callId = execOptions?.toolCallId || `tc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const blockedMsg = tracker ? tracker.check(norm.name, norm.input) : null;
-        send({ type: "tool_start", id: callId, name: norm.name, input: norm.input });
+        const blockedMsg = tracker ? tracker.check(spec.name, rawInput) : null;
+        send({ type: "tool_start", id: callId, name: spec.name, input: rawInput });
         if (blockedMsg) {
-          send({ type: "tool_end", id: callId, name: norm.name, result: blockedMsg });
+          send({ type: "tool_end", id: callId, name: spec.name, result: blockedMsg });
           return blockedMsg;
         }
         let result;
         try {
           const toolSignal = execOptions?.abortSignal || signal;
-          result = await aiRunTool(root, norm.name, norm.input ?? {}, send, allowWrites, latestUserText, toolSignal);
+          result = await aiRunTool(root, spec.name, rawInput, send, allowWrites, latestUserText, toolSignal, turnContext);
         } catch (error) {
           result = `That tool failed: ${String(error?.message || error)}`;
         }
-        if (tracker) tracker.record(norm.name, norm.input, result);
-        send({ type: "tool_end", id: callId, name: norm.name, result });
+        if (tracker) tracker.record(spec.name, rawInput, result);
+        send({ type: "tool_end", id: callId, name: spec.name, result });
         return result;
       },
     });
@@ -177,14 +132,7 @@ function aiBuildSdkToolSet({ root, allowWrites, send, latestUserText, tracker, s
   return toolSet;
 }
 
-function aiProviderThinkingOptions(provider, effort) {
-  if (effort !== "thinking") return undefined;
-  if (provider === "claude") {
-    return { anthropic: { thinking: { type: "enabled", budgetTokens: 8192 } } };
-  }
-  if (provider === "gemini") {
-    return { google: { thinkingConfig: { includeThoughts: true, thinkingBudget: 8192 } } };
-  }
+function aiProviderThinkingOptions() {
   return undefined;
 }
 
@@ -246,10 +194,9 @@ async function aiStreamOnceSdk({ sdkModel, system, messages, tools, maxSteps, pr
   return { ok: true, answered, said, toolCallsCount };
 }
 
-async function aiRunTextToolFallbackLoop({ sdkModel, root, system, initialMessages, allowWrites, maxSteps, provider, effort, signal, send, latestUserText, tracker }) {
+async function aiRunTextToolFallbackLoop({ sdkModel, root, system, initialMessages, allowWrites, turnContext = null, maxSteps, provider, effort, signal, send, latestUserText, tracker }) {
   const conv = [...initialMessages];
   let answeredAny = false;
-  let nudgedForFileWrite = false;
 
   for (let round = 0; round < maxSteps; round += 1) {
     if (signal?.aborted) return { ok: false, error: "stopped" };
@@ -270,15 +217,6 @@ async function aiRunTextToolFallbackLoop({ sdkModel, root, system, initialMessag
 
     const textCalls = aiExtractTextToolCalls(step.said);
     if (textCalls.length === 0) {
-      if (!nudgedForFileWrite && round === 0 && allowWrites && root && aiHasSubstantialCodeBlock(step.said)) {
-        nudgedForFileWrite = true;
-        conv.push({ role: "assistant", content: step.said });
-        conv.push({
-          role: "user",
-          content: `Write that code directly into the appropriate project file in ${root} using write_file or edit_file via a <tool_call> block.`,
-        });
-        continue;
-      }
       return { ok: true, answered: answeredAny };
     }
 
@@ -286,16 +224,16 @@ async function aiRunTextToolFallbackLoop({ sdkModel, root, system, initialMessag
     const resultBlocks = [];
     for (let i = 0; i < textCalls.length; i += 1) {
       const tc = textCalls[i];
-      const norm = aiNormalizeToolCall(tc.name, tc.input);
       const callId = `text-${round}-${i}`;
-      const blockedMsg = tracker.check(norm.name, norm.input);
-      send({ type: "tool_start", id: callId, name: norm.name, input: norm.input });
+      const rawInput = tc.input && typeof tc.input === "object" ? tc.input : {};
+      const blockedMsg = tracker.check(tc.name, rawInput);
+      send({ type: "tool_start", id: callId, name: tc.name, input: rawInput });
       const result = blockedMsg
         ? blockedMsg
-        : await aiRunTool(root, norm.name, norm.input ?? {}, send, allowWrites, latestUserText, signal);
-      if (!blockedMsg) tracker.record(norm.name, norm.input, result);
-      send({ type: "tool_end", id: callId, name: norm.name, result });
-      resultBlocks.push(`<tool_result name="${norm.name}">\n${result}\n</tool_result>`);
+        : await aiRunTool(root, tc.name, rawInput, send, allowWrites, latestUserText, signal, turnContext);
+      if (!blockedMsg) tracker.record(tc.name, rawInput, result);
+      send({ type: "tool_end", id: callId, name: tc.name, result });
+      resultBlocks.push(`<tool_result name="${tc.name}">\n${result}\n</tool_result>`);
       if (signal?.aborted) return { ok: false, error: "stopped" };
     }
     conv.push({ role: "user", content: resultBlocks.join("\n\n") });
@@ -303,13 +241,13 @@ async function aiRunTextToolFallbackLoop({ sdkModel, root, system, initialMessag
   return { ok: false, error: "too-many-rounds" };
 }
 
-async function aiRunUnifiedTurn({ provider, model, key, root, system, systemWithXmlCatalog, messages, allowWrites, effort = "fast", signal, send }) {
+async function aiRunUnifiedTurn({ provider, model, key, root, system, systemWithXmlCatalog, messages, allowWrites, toolMode = "full", allowBrowser = true, turnContext = null, effort = "fast", signal, send }) {
   const sdkModel = aiCreateSdkModel({ provider, model, key });
   const sdkMessages = aiMessagesToSdk(messages);
   const latestUserText = aiGetLatestUserText(messages);
   const tracker = aiCreateDoomLoopTracker();
   const maxSteps = effort === "thinking" ? AI_MAX_TOOL_ROUNDS : 16;
-  const sdkTools = aiBuildSdkToolSet({ root, allowWrites, send, latestUserText, tracker, signal });
+  const sdkTools = aiBuildSdkToolSet({ root, allowWrites, toolMode, allowBrowser, turnContext, send, latestUserText, tracker, signal });
 
   try {
     const res = await aiStreamOnceSdk({
@@ -324,28 +262,6 @@ async function aiRunUnifiedTurn({ provider, model, key, root, system, systemWith
       send,
     });
     if (!res.ok) return res;
-
-    if (res.toolCallsCount === 0 && allowWrites && root && aiHasSubstantialCodeBlock(res.said)) {
-      const nudgeRes = await aiStreamOnceSdk({
-        sdkModel,
-        system,
-        messages: [
-          ...sdkMessages,
-          { role: "assistant", content: res.said },
-          {
-            role: "user",
-            content: `Write that code directly into the appropriate project file in ${root} using write_file or edit_file now.`,
-          },
-        ],
-        tools: sdkTools,
-        maxSteps: 6,
-        provider,
-        effort,
-        signal,
-        send,
-      });
-      return { ok: nudgeRes.ok, answered: res.answered || nudgeRes.answered };
-    }
     return { ok: true, answered: res.answered };
   } catch (error) {
     if (signal?.aborted) return { ok: false, error: "stopped" };
@@ -357,6 +273,7 @@ async function aiRunUnifiedTurn({ provider, model, key, root, system, systemWith
         system: systemWithXmlCatalog || system,
         initialMessages: sdkMessages,
         allowWrites,
+        turnContext,
         maxSteps,
         provider,
         effort,
@@ -395,7 +312,7 @@ async function aiCompactSdk({ provider, model, key, messages, signal }) {
     .join("\n\n")
     .slice(0, 48000);
 
-  if (provider === "claude-code" || provider === "opencode" || (!key && provider !== "local")) {
+  if (provider === "claude-code" || provider === "antigravity" || provider === "codex" || (!key && provider !== "local")) {
     return older
       .map((m) => `- ${m.role === "user" ? "User" : "Assistant"}: ${String(m.content || "").replace(/\s+/g, " ").trim().slice(0, 220)}`)
       .join("\n");

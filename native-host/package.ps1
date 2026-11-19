@@ -61,7 +61,7 @@ Copy-Item (Join-Path $root "sidecar\workers\*.cjs") (Join-Path $out "sidecar\wor
 
 
 New-Item -ItemType Directory -Force -Path (Join-Path $out "resources") | Out-Null
-Copy-Item (Join-Path $root "resources\sssF.include") (Join-Path $out "resources")
+Copy-Item (Join-Path $root "resources\*") (Join-Path $out "resources") -Force
 
 Write-Host "== production node_modules (typescript, node-pty, prettier, node-forge, grpc, playwright-core) =="
 $pkg = @'

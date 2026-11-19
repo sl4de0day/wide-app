@@ -23,6 +23,8 @@ export function ScannerView() {
   const tasks = useScanner((s) => s.tasks);
   const issues = useScanner((s) => s.issues);
   const selected = useScanner((s) => s.selected);
+  const crawlSettings = useScanner((s) => s.crawlSettings);
+  const setCrawlSettings = useScanner((s) => s.setCrawlSettings);
   const [draft, setDraft] = useState("");
   const [crawlSeed, setCrawlSeed] = useState("");
   const session = useScanner((s) => s.session);
@@ -90,6 +92,55 @@ export function ScannerView() {
           <button type="button" onClick={() => crawlSeed.trim() && useScanner.getState().crawlScan(crawlSeed.trim())} disabled={!crawlSeed.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-0.5 text-[11px] text-sky-300 hover:bg-hover disabled:opacity-40">
             <Network className="size-3" strokeWidth={2} />
             {t("Crawl")}
+          </button>
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px]">
+          <button
+            type="button"
+            onClick={() => setCrawlSettings({ mode: crawlSettings.mode === "standard" ? "headless" : "standard" })}
+            className={cn(
+              "rounded-sm border px-1.5 py-0.5 transition-colors duration-100",
+              crawlSettings.mode === "headless" ? "border-accent bg-selected text-fg-bright" : "border-line text-fg-faint hover:text-fg",
+            )}
+          >
+            {crawlSettings.mode === "headless" ? t("Headless") : t("Standard")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCrawlSettings({ fieldScope: crawlSettings.fieldScope === "rdn" ? "fqdn" : "rdn" })}
+            className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-fg-dim hover:text-fg"
+          >
+            {crawlSettings.fieldScope}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCrawlSettings({ robotsAndSitemap: !crawlSettings.robotsAndSitemap })}
+            className={cn(
+              "rounded-sm border px-1.5 py-0.5 transition-colors duration-100",
+              crawlSettings.robotsAndSitemap ? "border-accent bg-selected text-fg-bright" : "border-line text-fg-faint hover:text-fg",
+            )}
+          >
+            {t("Robots")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCrawlSettings({ probePaths: !crawlSettings.probePaths })}
+            className={cn(
+              "rounded-sm border px-1.5 py-0.5 transition-colors duration-100",
+              crawlSettings.probePaths ? "border-accent bg-selected text-fg-bright" : "border-line text-fg-faint hover:text-fg",
+            )}
+          >
+            {t("Probe")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCrawlSettings({ filterSimilar: !crawlSettings.filterSimilar })}
+            className={cn(
+              "rounded-sm border px-1.5 py-0.5 transition-colors duration-100",
+              crawlSettings.filterSimilar ? "border-accent bg-selected text-fg-bright" : "border-line text-fg-faint hover:text-fg",
+            )}
+          >
+            {t("Dedup")}
           </button>
         </div>
         <div className="mt-2">

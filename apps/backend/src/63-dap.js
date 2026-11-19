@@ -35,8 +35,8 @@ function makeDapParser(onMessage) {
       buf = buf.slice(start + len);
       try {
         onMessage(JSON.parse(body));
-      } catch {
-
+      } catch (error) {
+        reportRecoverableError("dap", "parse adapter frame failed", error);
       }
     }
   };
@@ -79,7 +79,9 @@ async function dapInitAndLaunch(startArgs, adapterID, startCommand) {
 }
 
 function dapSendQuiet(command, args) {
-  dapSend(command, args).catch(() => {});
+  dapSend(command, args).catch((error) => {
+    reportRecoverableError("dap", `DAP command ${command} failed`, error);
+  });
 }
 
 function dapHandle(msg) {
@@ -104,8 +106,8 @@ async function dapEvent(msg) {
       await dapApplyAllBreakpoints();
       try {
         await dapSend("setExceptionBreakpoints", { filters: dapExceptionFilters() });
-      } catch {
-
+      } catch (error) {
+        reportRecoverableError("dap", "set exception breakpoints failed", error);
       }
       dapSendQuiet("configurationDone", {});
       break;
@@ -170,8 +172,8 @@ async function dapBuildFrames(threadId) {
           name: s.name || "Scope",
           objectId: dapRef(s.variablesReference),
         }));
-    } catch {
-
+    } catch (error) {
+      reportRecoverableError("dap", "inspect stack scopes failed", error);
     }
     const filePath = (frame.source && frame.source.path) || "";
     frames.push({
@@ -194,8 +196,8 @@ async function dapSetFileBreakpoints(file) {
       source: { path: file },
       breakpoints: lines.map((line) => ({ line: line + 1 })),
     });
-  } catch {
-
+  } catch (error) {
+    reportRecoverableError("dap", `set breakpoints failed (${file})`, error);
   }
 }
 

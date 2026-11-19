@@ -410,8 +410,13 @@ export default function App() {
         toast.error(t("Wide's backend stopped and could not be restarted. Save your work elsewhere and restart Wide."));
       }
     });
-    const offFault = bridge.onBackendFault(() => {
-      toast.error(t("Something went wrong in Wide's backend. If a panel stops responding, restart Wide."));
+    const offFault = bridge.onBackendFault(({ kind, detail }) => {
+      const cleanDetail = detail ? detail.trim().slice(0, 140) : "";
+      if (cleanDetail) {
+        toast.error(t("Backend error ({kind}): {detail}", { kind: kind || "fault", detail: cleanDetail }));
+      } else {
+        toast.error(t("Something went wrong in Wide's backend. If a panel stops responding, restart Wide."));
+      }
     });
     return () => {
       offState();

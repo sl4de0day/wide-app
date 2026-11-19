@@ -64,8 +64,8 @@ async function readUpdateState() {
 async function writeUpdateState(state) {
   try {
     await writeFileAtomic(updateStateFile(), JSON.stringify(state, null, 2), "utf8");
-  } catch {
-    void 0;
+  } catch (error) {
+    reportRecoverableError("updater", "persist update state failed", error);
   }
 }
 
@@ -388,8 +388,8 @@ function registerUpdateHandlers() {
       try {
         const parsed = JSON.parse(await promises.readFile(TABS_FILE(), "utf8"));
         if (parsed && typeof parsed === "object") all = parsed;
-      } catch {
-
+      } catch (error) {
+        reportRecoverableError("tabs", "read saved tabs failed", error, { ignoreCodes: ["ENOENT"] });
       }
       if (data && Array.isArray(data.files) && data.files.length) all[root] = data;
       else delete all[root];

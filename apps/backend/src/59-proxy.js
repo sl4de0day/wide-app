@@ -59,8 +59,8 @@ function runMacroChain(macro) {
         try {
           const match = new RegExp(rule.pattern).exec(source);
           if (match) vars.set(rule.name, match[1] ?? match[0]);
-        } catch {
-          void 0;
+        } catch (error) {
+          reportRecoverableError("proxy", `session macro regex failed (${rule.name})`, error);
         }
       }
     }
@@ -256,23 +256,45 @@ function sendRequestOnce(request, options = {}) {
   if (target.protocol !== "http:" && target.protocol !== "https:") {
     return Promise.resolve({ ok: false, error: "Only http and https can be sent." });
   }
+  if (options.allowCredentials !== true && (target.username || target.password)) {
+    return Promise.resolve({ ok: false, error: "Blocked URL containing embedded credentials (user:pass@)." });
+  }
+  if (options.allowPrivate === false && typeof reconEnforceSsrfPolicy === "function") {
+    const ssrf = reconEnforceSsrfPolicy(target.href, { allowPrivate: false });
+    if (!ssrf.allowed) {
+      return Promise.resolve({ ok: false, error: ssrf.error });
+    }
+  }
+  const effectiveHeaders =
+    options.tlsProfile && typeof reconApplyTlsPresetToHeaders === "function"
+      ? reconApplyTlsPresetToHeaders(headers, options.tlsProfile)
+      : headers;
+  const tlsPreset =
+    options.tlsProfile && typeof reconTlsProfilePreset === "function"
+      ? reconTlsProfilePreset(options.tlsProfile)
+      : null;
   const transport = target.protocol === "https:" ? node_https : node_http;
 
-  const outHeaders = pairsToNodeHeaders(headers);
-  if (body && !hasHeaderNamed(headers, "content-length") && !hasHeaderNamed(headers, "transfer-encoding")) {
+  const outHeaders = pairsToNodeHeaders(effectiveHeaders);
+  if (body && !hasHeaderNamed(effectiveHeaders, "content-length") && !hasHeaderNamed(effectiveHeaders, "transfer-encoding")) {
     outHeaders["Content-Length"] = String(Buffer.byteLength(body));
   }
 
   return new Promise((resolve) => {
+    const reqConfig = {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (target.protocol === "https:" ? 443 : 80),
+      method,
+      path: target.pathname + target.search,
+      headers: outHeaders,
+    };
+    if (target.protocol === "https:") {
+      if (options.insecure) reqConfig.rejectUnauthorized = false;
+      if (tlsPreset?.ciphers) reqConfig.ciphers = tlsPreset.ciphers;
+    }
     const outgoing = transport.request(
-      {
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: target.port || (target.protocol === "https:" ? 443 : 80),
-        method,
-        path: target.pathname + target.search,
-        headers: outHeaders,
-      },
+      reqConfig,
       (response) => {
         const status = response.statusCode || 0;
         const location = response.headers.location;
@@ -285,7 +307,15 @@ function sendRequestOnce(request, options = {}) {
           resolve(
             sendRequestOnce(
               { method: after.method, url: nextUrl, headers: after.headers, body: after.body ?? "" },
-              { followRedirects, redirectsLeft: redirectsLeft - 1, chain, started },
+              {
+                followRedirects,
+                redirectsLeft: redirectsLeft - 1,
+                chain,
+                started,
+                insecure: options.insecure,
+                allowPrivate: options.allowPrivate,
+                tlsProfile: options.tlsProfile,
+              },
             ),
           );
           return;
@@ -361,8 +391,8 @@ async function loadOrMakeCa() {
     if (stale || (typeof isLegacy === "function" && isLegacy.call(electron.safeStorage, keyBlob))) {
       try {
         await writeFileAtomic(PROXY_CA_KEY(), electron.safeStorage.encryptString(keyPem));
-      } catch {
-
+      } catch (error) {
+        reportRecoverableError("proxy", "reseal CA key failed", error);
       }
     }
     return proxyCa;
@@ -506,6 +536,39 @@ function queueEntry(entry) {
   if (!trafficTimer) trafficTimer = setTimeout(flushTraffic, 50);
 }
 function recordEntry(entry) {
+  try {
+    if (typeof reconAuditEntryQuick === "function") {
+      const quick = reconAuditEntryQuick(entry);
+      if (quick) {
+        if (quick.endpointClass) entry.endpointClass = quick.endpointClass;
+        if (quick.technologies.length > 0) entry.technologies = quick.technologies;
+        if (quick.securityIssueCount > 0) entry.securityIssueCount = quick.securityIssueCount;
+        if (quick.jwtCount > 0) entry.jwtCount = quick.jwtCount;
+        if (quick.secretCount > 0) entry.secretCount = quick.secretCount;
+      }
+    }
+    if (typeof reconInspectEntryQuick === "function") {
+      const inspectQuick = reconInspectEntryQuick(entry);
+      if (inspectQuick) {
+        entry.inspectSummary = inspectQuick;
+      }
+    }
+    if (
+      typeof broadcast === "function" &&
+      (entry.endpointClass || entry.technologies?.length || entry.securityIssueCount || entry.jwtCount || entry.secretCount || entry.inspectSummary)
+    ) {
+      broadcast("recon:passive", {
+        entryId: entry.id,
+        url: entry.url,
+        endpointClass: entry.endpointClass || null,
+        technologies: entry.technologies || [],
+        securityIssueCount: entry.securityIssueCount || 0,
+        jwtCount: entry.jwtCount || 0,
+        secretCount: entry.secretCount || 0,
+        inspectSummary: entry.inspectSummary || null,
+      });
+    }
+  } catch {}
   proxyLog.push(entry);
   if (proxyLog.length > PROXY_MAX_ENTRIES) proxyLog.shift();
   queueEntry(entry);
@@ -1197,7 +1260,8 @@ async function startProxy() {
   if (proxyServer) return { ok: true, port: proxyPort };
   try {
     await loadOrMakeCa();
-  } catch {
+  } catch (error) {
+    reportRecoverableError("proxy", "load or generate CA failed", error);
   }
 
   const server = node_http.createServer((req, res) => {
@@ -1528,8 +1592,8 @@ function registerProxyHandlers() {
         try {
           const match = new RegExp(rule.pattern).exec(source);
           if (match) vars.set(rule.name, match[1] ?? match[0]);
-        } catch {
-
+        } catch (error) {
+          reportRecoverableError("proxy", `macro regex failed (${rule.name})`, error);
         }
       }
       results.push({ ok: true, status: reply.status, ms: reply.ms });

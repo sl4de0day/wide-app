@@ -28,13 +28,16 @@ function shutdownServicesSync() {
   shutdownDone = true;
   const syncSteps = [
     lspStopAll,
+    claudeCodeStopAll,
+    antigravityStopAll,
     disposeAllTerminals,
     disposeEngine,
     disposeTools,
     closeAllRealtime,
     closeAllGrpc,
     mcpDisposeAll,
-    openCodeStop,
+    codexStopAll,
+    reconStopAll,
     stopProxy,
     stopOast,
     stopBuiltinOast,
@@ -43,8 +46,8 @@ function shutdownServicesSync() {
   for (const step of syncSteps) {
     try {
       step();
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("boot", "shutdown step failed", error);
     }
   }
 }
@@ -84,14 +87,16 @@ function reportFatal(kind, error) {
       version: electron.app.getVersion(),
       timestamp: Date.now()
     }), 'utf8');
-  } catch (e) {}
+  } catch (writeErr) {
+    console.error("[boot] failed to persist fault log:", String(writeErr?.message || writeErr));
+  }
 
   if (backendFailing) return;
   backendFailing = true;
   try {
     broadcast("backend:fault", { kind, detail });
-  } catch {
-    void 0;
+  } catch (error) {
+    console.warn("[boot] could not broadcast backend:fault:", String(error?.message || error));
   }
   const timer = setTimeout(() => {
     backendFailing = false;
@@ -111,8 +116,8 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => {
       void shutdownServices().finally(() => process.exit(0));
     });
-  } catch {
-    void 0;
+  } catch (error) {
+    reportRecoverableError("boot", `signal handler setup failed (${signal})`, error);
   }
 }
 
@@ -126,8 +131,8 @@ electron.app.whenReady().then(async () => {
     if (typeof electron.__initSecrets === "function") {
       try {
         await electron.__initSecrets();
-      } catch {
-        void 0;
+      } catch (error) {
+        reportRecoverableError("boot", "secret initialization failed", error, { surfaceToUi: true });
       }
     }
     await boot();
@@ -161,9 +166,11 @@ electron.app.whenReady().then(async () => {
     registerAiAgentHandlers();
     registerAiBrowserHandlers();
     registerClaudeCodeHandlers();
-    registerOpenCodeHandlers();
+    registerAntigravityHandlers();
+    registerCodexHandlers();
     registerBrowserHandlers();
     registerProxyHandlers();
+    registerReconHandlers();
     registerDebugHandlers();
     registerRemoteHandlers();
     registerUpdateHandlers();

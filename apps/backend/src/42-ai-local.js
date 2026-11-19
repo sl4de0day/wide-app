@@ -75,8 +75,8 @@ async function* ollamaStream(method, path, body, options) {
       if (!line) continue;
       try {
         yield JSON.parse(line);
-      } catch {
-
+      } catch (error) {
+        reportRecoverableError("ai-local", "parse Ollama NDJSON stream chunk failed", error);
       }
     }
   }
@@ -379,8 +379,8 @@ function registerAiLocalHandlers() {
           fitRatio: compat.ratio,
         };
       });
-    } catch {
-      void 0;
+    } catch (error) {
+      reportRecoverableError("ai-local", "refresh Ollama installed model list failed", error);
     }
     const runningModels = await aiLocalRunningModels();
     return { ok: true, running: true, installed: true, models, runningModels, hardware: hw };
@@ -441,7 +441,8 @@ function registerAiLocalHandlers() {
               return mName.includes(modelBase.split(":")[0]) || modelBase.includes(mName.split(":")[0]);
             });
             if (found) break;
-          } catch {
+          } catch (error) {
+            reportRecoverableError("ai-local", "verify pulled model registration failed", error);
           }
         }
         if (!found) {
@@ -472,7 +473,7 @@ function registerAiLocalHandlers() {
   });
 }
 
-async function aiRunLocalTurn({ model, root, system, systemWithXmlCatalog, messages, allowWrites, effort = "fast", signal, send }) {
+async function aiRunLocalTurn({ model, root, system, systemWithXmlCatalog, messages, allowWrites, toolMode = "full", allowBrowser = true, turnContext = null, effort = "fast", signal, send }) {
   const ready = await ollamaEnsure(null, signal);
   if (signal?.aborted) return { ok: false, error: "stopped" };
   if (!ready.ok) {
@@ -493,6 +494,9 @@ async function aiRunLocalTurn({ model, root, system, systemWithXmlCatalog, messa
       systemWithXmlCatalog: systemWithXmlCatalog || system,
       messages,
       allowWrites,
+      toolMode,
+      allowBrowser,
+      turnContext,
       effort,
       signal,
       send,

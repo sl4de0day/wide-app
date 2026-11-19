@@ -271,3 +271,42 @@ export function signalsFromResponse(url: string, headers: [string, string][], bo
   while ((match = metaRe.exec(body))) metas[match[1].toLowerCase()] = match[2];
   return { url, headers, cookies, html: body, scriptSrc, metas, js: {} };
 }
+
+export const BUILTIN_WAPPALYZER_RULESET: WappalyzerRuleset = {
+  categories: {
+    "1": { name: "CMS" },
+    "11": { name: "Blog" },
+    "12": { name: "JavaScript framework" },
+    "22": { name: "Web server" },
+    "27": { name: "Programming language" },
+    "31": { name: "CDN" },
+    "59": { name: "JavaScript library" },
+    "66": { name: "UI framework" },
+    "88": { name: "API" },
+  },
+  technologies: {
+    Nginx: { cats: [22], headers: { server: "nginx(?:/([\\d.]+))?\\;version:\\1" }, website: "https://nginx.org" },
+    Apache: { cats: [22], headers: { server: "apache(?:/([\\d.]+))?\\;version:\\1" }, website: "https://httpd.apache.org" },
+    Cloudflare: { cats: [31], headers: { server: "cloudflare", "cf-ray": ".*" }, website: "https://cloudflare.com" },
+    Express: { cats: [12], headers: { "x-powered-by": "Express" }, website: "https://expressjs.com" },
+    "Next.js": { cats: [12], headers: { "x-powered-by": "Next\\.js" }, html: "__NEXT_DATA__|/_next/static", js: { __NEXT_DATA__: "" }, website: "https://nextjs.org" },
+    React: { cats: [12], html: "data-reactroot|__REACT_DEVTOOLS_GLOBAL_HOOK__", js: { React: "", ReactDOM: "" }, scriptSrc: "react(?:-dom)?(?:[.-](\\d+(?:\\.\\d+)+))?\\;version:\\1", website: "https://react.dev" },
+    "Vue.js": { cats: [12], html: "data-v-[0-9a-f]{6,}|__VUE__", js: { Vue: "" }, scriptSrc: "vue(?:[.-](\\d+(?:\\.\\d+)+))?\\;version:\\1", website: "https://vuejs.org" },
+    Angular: { cats: [12], html: "ng-version=\"([\\d.]+)\"|ng-app\\;version:\\1", js: { angular: "", ng: "" }, website: "https://angular.dev" },
+    Svelte: { cats: [12], html: "svelte-[a-z0-9]{5,}|__SVELTEKIT", js: { Svelte: "" }, website: "https://svelte.dev" },
+    WordPress: { cats: [1, 11], html: "wp-content|wp-includes", meta: { generator: "WordPress(?: ([\\d.]+))?\\;version:\\1" }, website: "https://wordpress.org" },
+    Drupal: { cats: [1], headers: { "x-generator": "Drupal" }, js: { Drupal: "" }, meta: { generator: "Drupal(?: ([\\d.]+))?\\;version:\\1" }, website: "https://drupal.org" },
+    jQuery: { cats: [59], js: { jQuery: "" }, scriptSrc: "jquery(?:[.-](\\d+(?:\\.\\d+)+))?\\;version:\\1", website: "https://jquery.com" },
+    PHP: { cats: [27], headers: { "x-powered-by": "PHP(?:/([\\d.]+))?\\;version:\\1" }, cookies: { PHPSESSID: ".*" }, website: "https://php.net" },
+    "ASP.NET": { cats: [12], headers: { "x-powered-by": "ASP\\.NET", "x-aspnet-version": "([\\d.]+)\\;version:\\1" }, website: "https://dotnet.microsoft.com" },
+    GraphQL: { cats: [88], html: "graphql-playground|graphiql|__schema", website: "https://graphql.org" },
+  },
+};
+
+export function mergeWappalyzerRulesets(base: WappalyzerRuleset, ext: WappalyzerRuleset | null): WappalyzerRuleset {
+  if (!ext) return base;
+  return {
+    categories: { ...base.categories, ...ext.categories },
+    technologies: { ...base.technologies, ...ext.technologies },
+  };
+}

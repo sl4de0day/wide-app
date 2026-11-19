@@ -145,7 +145,9 @@ function handleDiscordIncomingData(chunk) {
       } else if (opcode === 2) {
         discordDisconnect();
       }
-    } catch {}
+    } catch (error) {
+      reportRecoverableError("discord-rpc", "handle RPC frame failed", error);
+    }
   }
 }
 
@@ -248,7 +250,9 @@ function discordRpcShutdown() {
         args: { pid: process.pid, activity: null },
         nonce: String(Date.now()),
       });
-    } catch {}
+    } catch (error) {
+      reportRecoverableError("discord-rpc", "clear activity failed", error);
+    }
   }
   discordDisconnect();
 }

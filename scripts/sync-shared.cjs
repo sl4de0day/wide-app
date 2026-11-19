@@ -18,6 +18,7 @@ const DIVERGENT = new Set([
 
 const SHARED_FILES = [
   'apps/backend/build.cjs',
+  'apps/backend/tsconfig.json',
   'apps/renderer/src/components/DatabaseView.tsx',
   'apps/renderer/src/panels/DatabasePanel.tsx',
   'apps/renderer/src/stores/database.ts',
@@ -35,7 +36,7 @@ const SHARED_FILES = [
   'resources/osv-bundle.json',
 ];
 
-const SHARED_DIRS = ['apps/backend/src', 'sidecar'];
+const SHARED_DIRS = ['apps/backend/src', 'sidecar', 'native-core'];
 
 function walkRel(baseDir, subDir) {
   const start = path.join(baseDir, subDir);
@@ -45,6 +46,9 @@ function walkRel(baseDir, subDir) {
   while (stack.length > 0) {
     const cur = stack.pop();
     for (const entry of fs.readdirSync(cur, { withFileTypes: true })) {
+      if (entry.isDirectory() && (entry.name === 'target' || entry.name === 'node_modules')) {
+        continue;
+      }
       const full = path.join(cur, entry.name);
       if (entry.isDirectory()) {
         stack.push(full);

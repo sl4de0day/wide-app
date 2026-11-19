@@ -206,6 +206,43 @@ export const PROBES: Probe[] = [
           /uid=\d+\([^)]+\)\s+gid=\d+/.test(body) && !/uid=\d+\(/.test(baseline.body) ? { snippet: "SSI exec (uid=…gid=…)" } : null,
       })),
   },
+  {
+    id: "evasion-encoding",
+    name: "Encoding evasion & parser differential",
+    severity: "medium",
+    cwe: "CWE-177",
+    points: ["query", "path", "body", "json"],
+    cases: (base) =>
+      [`${base}%2527%20union%20select%201`, `${base}%u0027`, `${base}%2e%2e%2fetc%2fpasswd`].map((send) => ({
+        send,
+        detect: ({ body, baseline }) => {
+          const re = /(root:.*:0:0:|SQL syntax|mysql_fetch|ORA-\d{4,5}|PostgreSQL.*ERROR|SQLSTATE\[)/i;
+          const hit = body.match(re);
+          return hit && !re.test(baseline.body) ? { snippet: hit[0] } : null;
+        },
+      })),
+  },
+  {
+    id: "http-smuggling-reflection",
+    name: "HTTP response splitting / header framing ambiguity",
+    severity: "high",
+    cwe: "CWE-444",
+    points: ["query", "header", "body"],
+    cases: (base) => {
+      const m = marker("smg");
+      return [`${base}%0d%0aX-Wide-Smuggle:${m}`, `${base}\r\nTransfer-Encoding: chunked`].map((send) => ({
+        send,
+        detect: ({ headers, status, baseline }) => {
+          const hdrHit = headers.some(([k, v]) => k.toLowerCase() === "x-wide-smuggle" || v.includes(m));
+          if (hdrHit) return { snippet: `injected header (${m})` };
+          if (status === 400 && baseline.status < 400 && send.includes("Transfer-Encoding")) {
+            return null;
+          }
+          return null;
+        },
+      }));
+    },
+  },
 ];
 
 export const CORS_PROBE = {

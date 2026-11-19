@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { bridge, type AiModelFile, type OpenCodeModel } from "@/lib/bridge";
+import { bridge, type AiAntigravityModelFamily, type AiCodexModel, type AiModelFile } from "@/lib/bridge";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useAi } from "@/stores/ai";
@@ -52,50 +52,45 @@ export function cleanModelName(raw: string): string {
 }
 
 const CLOUD_MODEL_NAMES: Record<string, string> = {
-  "gemini-3.7-flash": "Gemini 3.7 Flash",
-  "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview",
-  "gemini-3.5-flash-lite": "Gemini 3.5 Flash Lite",
-  "gemini-2.5-pro": "Gemini 2.5 Pro",
-  "gemini-2.5-flash": "Gemini 2.5 Flash",
-  "gemini-2.0-flash": "Gemini 2.0 Flash",
-  "gemini-1.5-pro": "Gemini 1.5 Pro",
-  "gemini-1.5-flash": "Gemini 1.5 Flash",
-
-  "deepseek-v4-pro": "DeepSeek V4 Pro",
-  "deepseek-v4-flash": "DeepSeek V4 Flash",
-  "deepseek-chat": "DeepSeek Chat",
-  "deepseek-reasoner": "DeepSeek Reasoner",
-  "deepseek-coder": "DeepSeek Coder",
-
-  "claude-sonnet-4-5": "Claude Sonnet 4.5",
-  "claude-opus-4-5": "Claude Opus 4.5",
-  "claude-haiku-4-5": "Claude Haiku 4.5",
-  "claude-3-7-sonnet": "Claude 3.7 Sonnet",
-  "claude-3-5-sonnet": "Claude 3.5 Sonnet",
-  "claude-3-5-haiku": "Claude 3.5 Haiku",
   "claude-code": "Claude Code",
+  antigravity: "Antigravity",
+  codex: "Codex",
+  sonnet: "Sonnet",
+  opus: "Opus",
+  haiku: "Haiku",
 };
 
 export function formatCloudModelName(raw: string, provider?: string): string {
   if (!raw) {
-    if (provider === "gemini") return "Gemini";
-    if (provider === "deepseek") return "DeepSeek";
-    if (provider === "claude") return "Claude API";
     if (provider === "claude-code") return "Claude Code";
-    if (provider === "opencode") return "OpenCode";
+    if (provider === "antigravity") return "Antigravity";
+    if (provider === "codex") return "Codex";
     return provider || "";
   }
   const clean = raw.trim();
   if (CLOUD_MODEL_NAMES[clean]) return CLOUD_MODEL_NAMES[clean];
 
-  if (provider === "opencode" || clean.startsWith("opencode/")) {
-    const unprefix = clean.replace(/^opencode\//i, "");
-    if (CLOUD_MODEL_NAMES[unprefix]) return CLOUD_MODEL_NAMES[unprefix];
-    return unprefix
+  if (provider === "codex") {
+    return clean
+      .replace(/^gpt-/i, "GPT-")
+      .split("-")
+      .map((part, idx) => {
+        if (idx === 0 && part.toUpperCase() === "GPT") return "GPT";
+        if (/^\d+(?:\.\d+)?$/.test(part)) return part;
+        return part ? part.charAt(0).toUpperCase() + part.slice(1) : "";
+      })
+      .join(" ")
+      .replace(/^GPT (\d)/, "GPT-$1");
+  }
+
+  if (provider === "antigravity") {
+    const family = clean.replace(/-(low|medium|high|xhigh|max)$/i, "");
+    if (/^gpt-oss-120b$/i.test(family)) return "GPT-OSS 120B";
+    return family
+      .replace(/(\d+)-(\d+)/g, "$1.$2")
       .replace(/[-_]/g, " ")
-      .replace(/(\d+)\s+(\d+)/g, "$1.$2")
       .split(" ")
-      .map((w) => (w.toLowerCase() === "vl" ? "VL" : w.charAt(0).toUpperCase() + w.slice(1)))
+      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : ""))
       .join(" ");
   }
 
@@ -414,137 +409,44 @@ function LocalHalf() {
   );
 }
 
-const keyDrafts: Record<string, string> = {};
+const CLAUDE_CODE_MODELS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "", label: "Default" },
+  { id: "sonnet", label: "Sonnet" },
+  { id: "opus", label: "Opus" },
+  { id: "haiku", label: "Haiku" },
+];
 
-function ProviderCard({
-  id,
-  label,
-  note,
-  models,
-}: {
-  id: string;
-  label: string;
-  note: string;
-  models: string[];
-}) {
-  const t = useT();
-  const configured = useAi((state) => state.keys[id]);
-  const config = useAi((state) => state.config);
-  const busy = useAi((state) => state.busy);
-  const [key, setKey] = useState(() => keyDrafts[id] ?? "");
-  const [open, setOpen] = useState(false);
-  const selected = config?.tab === "cloud" && config?.provider === id;
+const CLAUDE_FALLBACK_MODELS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "", label: "None" },
+  { id: "sonnet", label: "Sonnet" },
+  { id: "haiku", label: "Haiku" },
+];
 
-  const remember = (value: string) => {
-    keyDrafts[id] = value;
-    setKey(value);
-  };
-
-  return (
-    <div className="border-b border-line">
-      <button
-        type="button"
-        onClick={() =>
-          configured
-            ? void useAi.getState().setConfig({ tab: "cloud", provider: id })
-            : setOpen((was) => !was)
-        }
-        className={cn(
-          "flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors duration-150",
-          selected ? "bg-selected" : "hover:bg-hover",
-        )}
-      >
-        <span
-          className={cn("size-2 shrink-0 rounded-full", configured ? "bg-emerald-400" : "bg-fg-faint/40")}
-        />
-        <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", selected ? "text-fg-bright" : "text-fg")}>
-          {label}
-        </span>
-        {configured ? (
-          <span className="shrink-0 truncate text-[10.5px] text-fg-faint">
-            {formatCloudModelName(config?.cloudModel[id] ?? "", id)}
-          </span>
-        ) : (
-          <span className="shrink-0 text-[10.5px] font-medium text-accent">{t("Set up")}</span>
-        )}
-      </button>
-
-      {configured && selected && (
-        <div className="wide-enter-fade flex items-center gap-1.5 px-3 pb-2">
-          <select
-            value={config?.cloudModel[id] ?? ""}
-            onChange={(event) =>
-              void useAi.getState().setConfig({ cloudModel: { [id]: event.target.value } })
-            }
-            className="min-w-0 flex-1 rounded-md border border-line bg-panel px-2 py-1 text-[11px] text-fg outline-none focus:border-accent"
-          >
-            {models.map((model) => (
-              <option key={model} value={model}>
-                {formatCloudModelName(model, id)}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() =>
-              void bridge
-                .aiSetKey(id, "")
-                .then(() => bridge.aiKeyStatus())
-                .then((status) => useAi.setState({ keys: status.ok ? (status.configured ?? {}) : {} }))
-            }
-            className="shrink-0 rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-faint transition-colors duration-150 hover:bg-hover hover:text-fg"
-          >
-            {t("Forget")}
-          </button>
-        </div>
-      )}
-
-      {!configured && open && (
-        <div className="wide-enter-fade px-3 pb-2.5">
-          <p className="pb-1.5 text-[10.5px] leading-snug text-fg-faint">{note}</p>
-          <div className="flex items-center gap-1.5">
-            <input
-              type="password"
-              value={key}
-              onChange={(event) => remember(event.target.value)}
-              placeholder={t("API key")}
-              spellCheck={false}
-              className="min-w-0 flex-1 rounded-md border border-line bg-panel px-2.5 py-1.5 text-[11px] text-fg outline-none focus:border-accent placeholder:text-fg-faint"
-            />
-            <button
-              type="button"
-              disabled={!key.trim() || busy}
-              onClick={() =>
-                void useAi
-                  .getState()
-                  .setKey(id, key)
-                  .then((ok) => {
-                    if (!ok) return;
-                    remember("");
-                    setOpen(false);
-                    void useAi.getState().setConfig({ tab: "cloud", provider: id });
-                    void useAi.getState().refreshTelemetry();
-                  })
-              }
-              className="shrink-0 rounded-md border border-accent px-2.5 py-1.5 text-[11px] font-medium text-accent transition-colors duration-150 hover:bg-accent hover:text-bg disabled:opacity-40"
-            >
-              {busy ? t("Checking…") : t("Save")}
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-let claudeProbe: { checked: boolean; installed: boolean; signedIn: boolean } | null = null;
+let claudeProbe: {
+  checked: boolean;
+  installed: boolean;
+  signedIn: boolean;
+  email: string;
+  subscriptionType: string;
+  authMethod: string;
+} | null = null;
 
 function ClaudeCodeCard() {
   const t = useT();
   const config = useAi((state) => state.config);
   const selected = config?.tab === "cloud" && config?.provider === "claude-code";
+  const chosenModel = (config?.cloudModel?.["claude-code"] ?? "").trim().toLowerCase();
+  const fallbackModel = (config?.claudeFallbackModel ?? "sonnet").trim().toLowerCase();
   const [state, setState] = useState(
-    () => claudeProbe ?? { checked: false, installed: false, signedIn: false },
+    () =>
+      claudeProbe ?? {
+        checked: false,
+        installed: false,
+        signedIn: false,
+        email: "",
+        subscriptionType: "",
+        authMethod: "",
+      },
   );
   const [busy, setBusy] = useState(false);
 
@@ -553,7 +455,10 @@ function ClaudeCodeCard() {
       claudeProbe = {
         checked: true,
         installed: Boolean(reply.ok && reply.installed),
-        signedIn: Boolean(reply.ok && reply.signedIn),
+        signedIn: Boolean(reply.ok && (reply.signedIn || reply.loggedIn)),
+        email: String(reply.ok && reply.email ? reply.email : ""),
+        subscriptionType: String(reply.ok && reply.subscriptionType ? reply.subscriptionType : ""),
+        authMethod: String(reply.ok && reply.authMethod ? reply.authMethod : ""),
       };
       setState(claudeProbe);
     });
@@ -564,236 +469,533 @@ function ClaudeCodeCard() {
     check();
   }, []);
 
-  const act = async (what: "install" | "login") => {
+  const act = async (what: "install" | "login" | "logout") => {
     setBusy(true);
     if (what === "install") await bridge.aiClaudeCodeInstall();
+    else if (what === "logout") await bridge.aiClaudeCodeLogout();
     else await bridge.aiClaudeCodeLogin();
     setBusy(false);
     check();
   };
 
+  const selectClaudeModel = (modelId: string) => {
+    void useAi.getState().setConfig({
+      tab: "cloud",
+      provider: "claude-code",
+      cloudModel: { ...(config?.cloudModel ?? {}), "claude-code": modelId },
+    });
+  };
+
+  const subBadge = state.subscriptionType || (state.authMethod === "claude.ai" ? "Claude.ai" : state.authMethod);
+
   return (
     <div className="border-b border-line">
-      <button
-        type="button"
-        onClick={() =>
-          state.installed
-            ? void useAi.getState().setConfig({ tab: "cloud", provider: "claude-code" })
-            : void act("install")
-        }
-        disabled={busy}
-        className={cn(
-          "flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors duration-150 disabled:opacity-60",
-          selected ? "bg-selected" : "hover:bg-hover",
-        )}
-      >
-        <span
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            state.signedIn ? "bg-emerald-400" : state.installed ? "bg-amber-400" : "bg-fg-faint/40",
+      <div className={cn("flex w-full items-center gap-1 pr-2 transition-colors duration-150", selected ? "bg-selected" : "hover:bg-hover")}>
+        <button
+          type="button"
+          onClick={() =>
+            state.installed
+              ? void useAi.getState().setConfig({ tab: "cloud", provider: "claude-code" })
+              : void act("install")
+          }
+          disabled={busy}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left disabled:opacity-60"
+        >
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              state.signedIn ? "bg-emerald-400" : state.installed ? "bg-amber-400" : "bg-fg-faint/40",
+            )}
+          />
+          <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", selected ? "text-fg-bright" : "text-fg")}>
+            Claude Code
+          </span>
+          {subBadge && state.signedIn && (
+            <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9.5px] font-medium uppercase text-emerald-400">
+              {subBadge}
+            </span>
           )}
-        />
-        <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", selected ? "text-fg-bright" : "text-fg")}>
-          Claude Code
-        </span>
-        <span className="shrink-0 text-[10.5px] font-medium text-accent">
-          {busy ? t("Working…") : !state.checked ? t("Checking…") : state.installed ? "" : t("Install")}
-        </span>
-      </button>
+          <span className="shrink-0 text-[10.5px] font-medium text-accent">
+            {busy ? t("Working…") : !state.checked ? t("Checking…") : state.installed ? "" : t("Install")}
+          </span>
+        </button>
+        {state.installed && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => check()}
+            title={t("Refresh status")}
+            aria-label={t("Refresh status")}
+            className="flex size-6 shrink-0 items-center justify-center rounded text-fg-faint hover:bg-hover hover:text-fg disabled:opacity-40"
+          >
+            <RotateCw className="size-3" strokeWidth={1.75} />
+          </button>
+        )}
+      </div>
 
-      {state.checked && !state.signedIn && (
+      {state.checked && state.installed && (
+        <div className="space-y-2 px-3 pb-2.5 pt-1">
+          {!state.signedIn ? (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10.5px] leading-snug text-fg-faint">
+                {t("Uses your Claude subscription rather than a key.")}
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void act("login")}
+                className="shrink-0 rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-dim transition-colors duration-150 hover:bg-hover hover:text-fg disabled:opacity-40"
+              >
+                {t("Sign in")}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 text-[10.5px] text-fg-faint">
+              <span className="truncate">{state.email || t("Connected via Claude subscription")}</span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void act("logout")}
+                className="shrink-0 rounded border border-line/70 px-2 py-0.5 text-[10px] text-fg-faint hover:bg-hover hover:text-fg disabled:opacity-40"
+              >
+                {t("Sign out")}
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1">
+            {CLAUDE_CODE_MODELS.map((opt) => {
+              const activeModel = selected && chosenModel === opt.id;
+              return (
+                <button
+                  key={opt.id || "default"}
+                  type="button"
+                  onClick={() => selectClaudeModel(opt.id)}
+                  className={cn(
+                    "rounded-md border px-2 py-0.5 text-[10.5px] transition-colors",
+                    activeModel
+                      ? "border-accent/50 bg-accent/15 text-accent font-medium"
+                      : "border-line/70 text-fg-dim hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  {opt.id === "" ? t("Default") : opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between gap-2 text-[10px] text-fg-faint">
+            <span>{t("Fallback model")}</span>
+            <div className="flex items-center gap-1">
+              {CLAUDE_FALLBACK_MODELS.map((opt) => (
+                <button
+                  key={opt.id || "none"}
+                  type="button"
+                  onClick={() => void useAi.getState().setConfig({ claudeFallbackModel: opt.id })}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] transition-colors",
+                    fallbackModel === opt.id
+                      ? "bg-hover text-fg-bright font-medium"
+                      : "text-fg-faint hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  {opt.id === "" ? t("None") : opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {state.checked && !state.installed && (
         <div className="px-3 pb-2.5">
-          <p className="pb-1.5 text-[10.5px] leading-snug text-fg-faint">
+          <p className="text-[10.5px] leading-snug text-fg-faint">
             {t("Uses your Claude subscription rather than a key.")}
           </p>
-          {state.installed && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void act("login")}
-              className="rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-dim transition-colors duration-150 hover:bg-hover hover:text-fg disabled:opacity-40"
-            >
-              {t("Sign in")}
-            </button>
-          )}
         </div>
       )}
     </div>
   );
 }
 
-let openCodeProbeState: {
+let antigravityProbe: {
   checked: boolean;
   installed: boolean;
-  broken: boolean;
+  signedIn: boolean;
   version: string;
+  mcpAttached: boolean;
+  models: AiAntigravityModelFamily[];
 } | null = null;
-let openCodeCachedModels: OpenCodeModel[] = [];
 
-function OpenCodeCard() {
+function AntigravityCard() {
   const t = useT();
   const config = useAi((state) => state.config);
-  const selected = config?.tab === "cloud" && config?.provider === "opencode";
-  const [probe, setProbe] = useState(
-    () => openCodeProbeState ?? { checked: false, installed: false, broken: false, version: "" },
+  const selected = config?.tab === "cloud" && config?.provider === "antigravity";
+  const chosenModel = (config?.cloudModel?.antigravity ?? "").trim();
+  const [state, setState] = useState(
+    () =>
+      antigravityProbe ?? {
+        checked: false,
+        installed: false,
+        signedIn: false,
+        version: "",
+        mcpAttached: false,
+        models: [],
+      },
   );
-  const [models, setModels] = useState<OpenCodeModel[]>(() => openCodeCachedModels);
   const [busy, setBusy] = useState(false);
-  const [loadingModels, setLoadingModels] = useState(false);
 
-  const fetchModels = async (fresh = false) => {
-    setLoadingModels(true);
-    try {
-      const reply = await bridge.aiOpenCodeModels(fresh);
-      if (reply.ok && Array.isArray(reply.models)) {
-        openCodeCachedModels = reply.models;
-        setModels(reply.models);
-        const current = useAi.getState().config?.cloudModel?.opencode;
-        if (!current && reply.selectedModel) {
-          void useAi.getState().setConfig({
-            cloudModel: { opencode: reply.selectedModel },
-          });
-        }
-      }
-    } finally {
-      setLoadingModels(false);
-    }
-  };
-
-  const check = (fresh = false) => {
-    void bridge.aiOpenCodeStatus(fresh).then((reply) => {
-      const next = {
+  const check = (force = false) => {
+    void bridge.aiAntigravityStatus(force ? { force: true } : undefined).then((reply) => {
+      const models = Array.isArray(reply.models) ? reply.models : [];
+      antigravityProbe = {
         checked: true,
         installed: Boolean(reply.ok && reply.installed),
-        broken: Boolean(reply.ok && reply.broken),
-        version: reply.ok ? (reply.version ?? "") : "",
+        signedIn: Boolean(reply.ok && reply.signedIn),
+        version: String(reply.ok && reply.version ? reply.version : ""),
+        mcpAttached: Boolean(reply.ok && reply.mcpAttached),
+        models,
       };
-      openCodeProbeState = next;
-      setProbe(next);
-      if (next.installed) {
-        void fetchModels(fresh);
-      }
+      useAi.getState().setAntigravityModels(models);
+      setState(antigravityProbe);
     });
   };
 
   useEffect(() => {
-    if (openCodeProbeState) {
-      if (openCodeProbeState.installed && openCodeCachedModels.length === 0) {
-        void fetchModels();
-      }
-      return;
-    }
-    check();
+    if (antigravityProbe) return;
+    check(false);
   }, []);
 
-  const install = async () => {
+  const act = async (what: "install" | "login" | "attachMcp") => {
     setBusy(true);
-    try {
-      await bridge.aiOpenCodeInstall();
-      check(true);
-    } finally {
-      setBusy(false);
-    }
+    if (what === "install") await bridge.aiAntigravityInstall();
+    else if (what === "attachMcp") await bridge.aiAntigravityAttachMcp();
+    else await bridge.aiAntigravityLogin();
+    setBusy(false);
+    check(true);
   };
 
-  const selectCard = () => {
-    if (probe.installed) {
-      const current = config?.cloudModel?.opencode;
-      const fallback = models[0]?.key || "";
-      void useAi.getState().setConfig({
-        tab: "cloud",
-        provider: "opencode",
-        ...(!current && fallback ? { cloudModel: { opencode: fallback } } : {}),
-      });
-    } else {
-      void install();
-    }
+  const selectAntigravityModel = (modelId: string) => {
+    void useAi.getState().setConfig({
+      tab: "cloud",
+      provider: "antigravity",
+      cloudModel: { ...(config?.cloudModel ?? {}), antigravity: modelId },
+    });
   };
-
-  const selectedModelKey = config?.cloudModel?.opencode ?? "";
 
   return (
     <div className="border-b border-line">
-      <button
-        type="button"
-        onClick={selectCard}
-        disabled={busy}
-        className={cn(
-          "flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors duration-150 disabled:opacity-60",
-          selected ? "bg-selected" : "hover:bg-hover",
-        )}
-      >
-        <span
-          className={cn(
-            "size-2 shrink-0 rounded-full",
-            probe.installed ? "bg-emerald-400" : probe.broken ? "bg-amber-400" : "bg-fg-faint/40",
-          )}
-        />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-[12px] font-medium",
-            selected ? "text-fg-bright" : "text-fg",
-          )}
+      <div className={cn("flex w-full items-center gap-1 pr-2 transition-colors duration-150", selected ? "bg-selected" : "hover:bg-hover")}>
+        <button
+          type="button"
+          onClick={() =>
+            state.installed
+              ? void useAi.getState().setConfig({ tab: "cloud", provider: "antigravity" })
+              : void act("install")
+          }
+          disabled={busy}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left disabled:opacity-60"
         >
-          OpenCode
-        </span>
-        {probe.installed ? (
-          <span className="shrink-0 truncate text-[10.5px] text-fg-faint">
-            {formatCloudModelName(selectedModelKey || models[0]?.name || "", "opencode")}
-          </span>
-        ) : (
-          <span className="shrink-0 text-[10.5px] font-medium text-accent">
-            {busy ? t("Working…") : !probe.checked ? t("Checking…") : t("Install")}
-          </span>
-        )}
-      </button>
-
-      {probe.installed && selected && (
-        <div className="wide-enter-fade flex items-center gap-1.5 px-3 pb-2.5">
-          <select
-            value={selectedModelKey}
-            onChange={(event) =>
-              void useAi.getState().setConfig({ cloudModel: { opencode: event.target.value } })
-            }
-            className="min-w-0 flex-1 rounded-md border border-line bg-panel px-2 py-1 text-[11px] text-fg outline-none focus:border-accent"
-          >
-            {models.length === 0 ? (
-              <option value="">{loadingModels ? t("Checking…") : t("No model chosen")}</option>
-            ) : (
-              models.map((m) => (
-                <option key={m.key} value={m.key}>
-                  {m.name || formatCloudModelName(m.key, "opencode")}
-                  {m.free ? " (Free)" : ""}
-                </option>
-              ))
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              state.signedIn ? "bg-emerald-400" : state.installed ? "bg-amber-400" : "bg-fg-faint/40",
             )}
-          </select>
-          <button
-            type="button"
-            onClick={() => void fetchModels(true)}
-            disabled={loadingModels}
-            title={t("Refresh")}
-            aria-label={t("Refresh")}
-            className="shrink-0 rounded-md border border-line p-1 text-fg-faint transition-colors duration-150 hover:bg-hover hover:text-fg disabled:opacity-40"
-          >
-            <RotateCw className={cn("size-3", loadingModels && "animate-spin")} strokeWidth={1.75} />
-          </button>
-        </div>
-      )}
-
-      {probe.checked && !probe.installed && (
-        <div className="px-3 pb-2.5">
-          <p className="pb-1.5 text-[10.5px] leading-snug text-fg-faint">
-            {t("Access free models through the OpenCode CLI.")}
-          </p>
+          />
+          <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", selected ? "text-fg-bright" : "text-fg")}>
+            Antigravity
+          </span>
+          {state.version && state.installed && (
+            <span className="shrink-0 rounded bg-panel px-1.5 py-0.5 text-[9.5px] font-medium text-fg-faint">
+              v{state.version}
+            </span>
+          )}
+          <span className="shrink-0 text-[10.5px] font-medium text-accent">
+            {busy ? t("Working…") : !state.checked ? t("Checking…") : state.installed ? "" : t("Install")}
+          </span>
+        </button>
+        {state.installed && (
           <button
             type="button"
             disabled={busy}
-            onClick={() => void install()}
-            className="rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-dim transition-colors duration-150 hover:bg-hover hover:text-fg disabled:opacity-40"
+            onClick={() => check(true)}
+            title={t("Refresh status")}
+            aria-label={t("Refresh status")}
+            className="flex size-6 shrink-0 items-center justify-center rounded text-fg-faint hover:bg-hover hover:text-fg disabled:opacity-40"
           >
-            {busy ? t("Working…") : t("Install")}
+            <RotateCw className="size-3" strokeWidth={1.75} />
           </button>
+        )}
+      </div>
+
+      {state.checked && state.installed && (
+        <div className="space-y-2 px-3 pb-2.5 pt-1">
+          {!state.signedIn ? (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10.5px] leading-snug text-fg-faint">
+                {t("Uses your Google Antigravity account.")}
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void act("login")}
+                className="shrink-0 rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-dim transition-colors duration-150 hover:bg-hover hover:text-fg disabled:opacity-40"
+              >
+                {t("Sign in")}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 text-[10.5px] text-fg-faint">
+              <span className="truncate">{t("Connected via Google Antigravity")}</span>
+              {state.mcpAttached ? (
+                <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9.5px] font-medium text-emerald-400">
+                  {t("Wide MCP attached")}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void act("attachMcp")}
+                  className="shrink-0 rounded border border-line/70 px-2 py-0.5 text-[10px] text-fg-faint hover:bg-hover hover:text-fg disabled:opacity-40"
+                >
+                  {t("Attach Wide Tools")}
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1">
+            {[{ id: "", label: "Default" }, ...state.models.map((m) => ({ id: m.id, label: m.label }))].map((opt) => {
+              const activeModel = selected && chosenModel === opt.id;
+              return (
+                <button
+                  key={opt.id || "default"}
+                  type="button"
+                  onClick={() => selectAntigravityModel(opt.id)}
+                  className={cn(
+                    "rounded-md border px-2 py-0.5 text-[10.5px] transition-colors",
+                    activeModel
+                      ? "border-accent/50 bg-accent/15 text-accent font-medium"
+                      : "border-line/70 text-fg-dim hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  {opt.id === "" ? t("Default") : opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {state.checked && !state.installed && (
+        <div className="px-3 pb-2.5">
+          <p className="text-[10.5px] leading-snug text-fg-faint">
+            {t("Uses your Google Antigravity account.")}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+let codexProbe: {
+  checked: boolean;
+  installed: boolean;
+  signedIn: boolean;
+  version: string;
+  email: string;
+  planType: string;
+  models: AiCodexModel[];
+} | null = null;
+
+function CodexCard() {
+  const t = useT();
+  const config = useAi((state) => state.config);
+  const selected = config?.tab === "cloud" && config?.provider === "codex";
+  const chosenModel = (config?.cloudModel?.codex ?? "").trim();
+  const [state, setState] = useState(
+    () =>
+      codexProbe ?? {
+        checked: false,
+        installed: false,
+        signedIn: false,
+        version: "",
+        email: "",
+        planType: "",
+        models: [],
+      },
+  );
+  const [busy, setBusy] = useState(false);
+
+  const check = (force = false) => {
+    void bridge.aiCodexStatus(force ? { force: true } : undefined).then((reply) => {
+      const models = Array.isArray(reply.models) ? reply.models : [];
+      codexProbe = {
+        checked: true,
+        installed: Boolean(reply.ok && reply.installed),
+        signedIn: Boolean(reply.ok && reply.signedIn),
+        version: String(reply.ok && reply.version ? reply.version : ""),
+        email: String(reply.ok && reply.email ? reply.email : ""),
+        planType: String(reply.ok && reply.planType ? reply.planType : ""),
+        models,
+      };
+      useAi.getState().setCodexModels(models);
+      setState(codexProbe);
+    });
+  };
+
+  useEffect(() => {
+    if (codexProbe) return;
+    check(false);
+  }, []);
+
+  const act = async (what: "install" | "login" | "logout") => {
+    setBusy(true);
+    if (what === "install") await bridge.aiCodexInstall();
+    else if (what === "logout") await bridge.aiCodexLogout();
+    else await bridge.aiCodexLogin();
+    setBusy(false);
+    check(true);
+  };
+
+  const selectCodexModel = (modelId: string) => {
+    const aiState = useAi.getState();
+    const targetModel =
+      (modelId
+        ? state.models.find((m) => m.id === modelId || m.model === modelId)
+        : state.models.find((m) => m.isDefault)) || state.models[0];
+    const supported = targetModel?.supportedReasoningEfforts?.map((o) => o.reasoningEffort) ?? [];
+    const currentEffort = aiState.codexEffort;
+    const nextEffort =
+      supported.length > 0 && !supported.includes(currentEffort)
+        ? targetModel?.defaultReasoningEffort && supported.includes(targetModel.defaultReasoningEffort)
+          ? targetModel.defaultReasoningEffort
+          : supported[0]
+        : currentEffort;
+
+    void aiState.setConfig({
+      tab: "cloud",
+      provider: "codex",
+      cloudModel: { ...(config?.cloudModel ?? {}), codex: modelId },
+      ...(nextEffort !== currentEffort ? { codexEffort: nextEffort } : {}),
+    });
+  };
+
+  return (
+    <div>
+      <div
+        className={cn(
+          "flex w-full items-center gap-1 pr-2 transition-colors duration-150",
+          selected ? "bg-selected" : "hover:bg-hover",
+        )}
+      >
+        <button
+          type="button"
+          onClick={() =>
+            state.installed
+              ? void useAi.getState().setConfig({ tab: "cloud", provider: "codex" })
+              : void act("install")
+          }
+          disabled={busy}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2.5 text-left disabled:opacity-60"
+        >
+          <span
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              state.signedIn ? "bg-emerald-400" : state.installed ? "bg-amber-400" : "bg-fg-faint/40",
+            )}
+          />
+          <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", selected ? "text-fg-bright" : "text-fg")}>
+            OpenAI Codex
+          </span>
+          {state.version && state.installed && (
+            <span className="shrink-0 rounded bg-panel px-1.5 py-0.5 text-[9.5px] font-medium text-fg-faint">
+              v{state.version.replace(/^codex-cli\s+/i, "")}
+            </span>
+          )}
+          <span className="shrink-0 text-[10.5px] font-medium text-accent">
+            {busy ? t("Working…") : !state.checked ? t("Checking…") : state.installed ? "" : t("Install")}
+          </span>
+        </button>
+        {state.installed && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => check(true)}
+            title={t("Refresh status")}
+            aria-label={t("Refresh status")}
+            className="flex size-6 shrink-0 items-center justify-center rounded text-fg-faint hover:bg-hover hover:text-fg disabled:opacity-40"
+          >
+            <RotateCw className="size-3" strokeWidth={1.75} />
+          </button>
+        )}
+      </div>
+
+      {state.checked && state.installed && (
+        <div className="space-y-2 px-3 pb-2.5 pt-1">
+          {!state.signedIn ? (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10.5px] leading-snug text-fg-faint">
+                {t("Uses your ChatGPT subscription (Plus, Pro, Business).")}
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void act("login")}
+                className="shrink-0 rounded-md border border-line px-2.5 py-1 text-[11px] text-fg-dim transition-colors duration-150 hover:bg-hover hover:text-fg disabled:opacity-40"
+              >
+                {t("Sign in")}
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 text-[10.5px] text-fg-faint">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate">{state.email || t("Connected via ChatGPT subscription")}</span>
+                {state.planType && (
+                  <span className="shrink-0 rounded bg-panel px-1.5 py-0.5 text-[9.5px] uppercase text-fg-dim">
+                    {state.planType}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void act("logout")}
+                className="shrink-0 rounded border border-line/70 px-2 py-0.5 text-[10px] text-fg-faint hover:bg-hover hover:text-fg disabled:opacity-40"
+              >
+                {t("Sign out")}
+              </button>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-1">
+            {[{ id: "", label: "Default" }, ...state.models.map((m) => ({ id: m.id, label: m.displayName || m.id }))].map((opt) => {
+              const activeModel = selected && chosenModel === opt.id;
+              return (
+                <button
+                  key={opt.id || "default"}
+                  type="button"
+                  onClick={() => selectCodexModel(opt.id)}
+                  className={cn(
+                    "rounded-md border px-2 py-0.5 text-[10.5px] transition-colors",
+                    activeModel
+                      ? "border-accent/50 bg-accent/15 text-accent font-medium"
+                      : "border-line/70 text-fg-dim hover:bg-hover hover:text-fg",
+                  )}
+                >
+                  {opt.id === "" ? t("Default") : opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {state.checked && !state.installed && (
+        <div className="px-3 pb-2.5">
+          <p className="text-[10.5px] leading-snug text-fg-faint">
+            {t("Uses your ChatGPT subscription (Plus, Pro, Business).")}
+          </p>
         </div>
       )}
     </div>
@@ -801,29 +1003,11 @@ function OpenCodeCard() {
 }
 
 function CloudHalf() {
-  const t = useT();
   return (
     <>
-      <ProviderCard
-        id="gemini"
-        label="Gemini"
-        note={t("The key comes from Google AI Studio.")}
-        models={["gemini-3.7-flash", "gemini-3.1-pro-preview", "gemini-3.5-flash-lite"]}
-      />
-      <ProviderCard
-        id="deepseek"
-        label="DeepSeek"
-        note={t("The key comes from the DeepSeek platform.")}
-        models={["deepseek-v4-pro", "deepseek-v4-flash"]}
-      />
-      <ProviderCard
-        id="claude"
-        label="Claude API"
-        note={t("Pay per token, with a key from the Claude Console.")}
-        models={["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"]}
-      />
       <ClaudeCodeCard />
-      <OpenCodeCard />
+      <AntigravityCard />
+      <CodexCard />
     </>
   );
 }
@@ -831,7 +1015,8 @@ function CloudHalf() {
 export function useModelLabel(): { label: string; ready: boolean } {
   const t = useT();
   const config = useAi((state) => state.config);
-  const keys = useAi((state) => state.keys);
+  const antigravityModels = useAi((state) => state.antigravityModels);
+  const codexModels = useAi((state) => state.codexModels);
 
   if (!config) return { label: t("No model chosen"), ready: false };
   if (config.tab === "local") {
@@ -840,26 +1025,25 @@ export function useModelLabel(): { label: string; ready: boolean } {
       ready: Boolean(config.localModel),
     };
   }
-  if (config.provider === "claude-code") return { label: "Claude Code", ready: true };
-  if (config.provider === "opencode") {
-    const chosen = config.cloudModel?.opencode ?? "";
-    return {
-      label: formatCloudModelName(chosen, "opencode") || "OpenCode",
-      ready: true,
-    };
+  if (config.provider === "codex") {
+    const chosen = (config.cloudModel?.codex ?? "").trim();
+    const matched = (codexModels.length > 0 ? codexModels : codexProbe?.models ?? []).find(
+      (m) => m.id === chosen || m.model === chosen,
+    );
+    const suffix = matched ? matched.displayName || matched.id : chosen ? formatCloudModelName(chosen, "codex") : "";
+    return { label: suffix ? `Codex · ${suffix}` : "Codex", ready: true };
   }
-  const model = config.cloudModel[config.provider] ?? "";
-  const ready = Boolean(keys[config.provider]);
-  if (!ready || !model) {
-    const providerName =
-      { gemini: "Gemini", deepseek: "DeepSeek", claude: "Claude API" }[config.provider] ??
-      config.provider;
-    return { label: providerName, ready };
+  if (config.provider === "antigravity") {
+    const chosen = (config.cloudModel?.antigravity ?? "").trim();
+    const matched = (antigravityModels.length > 0 ? antigravityModels : antigravityProbe?.models ?? []).find(
+      (m) => m.id === chosen,
+    );
+    const suffix = matched ? matched.label : chosen ? formatCloudModelName(chosen, "antigravity") : "";
+    return { label: suffix ? `Antigravity · ${suffix}` : "Antigravity", ready: true };
   }
-  return {
-    label: formatCloudModelName(model, config.provider),
-    ready: true,
-  };
+  const chosen = (config.cloudModel?.["claude-code"] ?? "").trim().toLowerCase();
+  const suffix = chosen === "sonnet" ? "Sonnet" : chosen === "opus" ? "Opus" : chosen === "haiku" ? "Haiku" : "";
+  return { label: suffix ? `Claude Code · ${suffix}` : "Claude Code", ready: true };
 }
 
 export function ModelPicker({ className }: { className?: string } = {}) {

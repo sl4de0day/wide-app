@@ -132,8 +132,8 @@ function registerWorkflowHandlers() {
     let existing = {};
     try {
       existing = JSON.parse(await promises.readFile(workflowPath, "utf8"));
-    } catch {
-
+    } catch (error) {
+      reportRecoverableError("workflow", "read workflow file failed", error, { ignoreCodes: ["ENOENT"] });
     }
 
     const dir = node_path.dirname(workflowPath);

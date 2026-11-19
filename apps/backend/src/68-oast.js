@@ -146,8 +146,8 @@ function registerOastHandlers() {
         if (line.startsWith("{")) {
           try {
             oastRecordInteraction(JSON.parse(line));
-          } catch {
-
+          } catch (error) {
+            reportRecoverableError("oast", "parse interaction event failed", error);
           }
         } else if (!oastDomain && OAST_DOMAIN_RE.test(line) && line.includes(".")) {
           oastDomain = line;

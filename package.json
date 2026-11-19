@@ -1,6 +1,6 @@
 {
   "name": "wide-app",
-  "version": "0.5151126",
+  "version": "0.6191126",
   "description": "Autonomous AI workspace and mission control for the Wide ecosystem",
   "private": true,
   "workspaces": [
@@ -24,7 +24,7 @@
     "checksums": "node scripts/generate-checksums.cjs",
     "package:all": "npm run package:win && npm run package:linux && npm run package:deb && npm run package:rpm && npm run package:arch && npm run package:appimage && npm run checksums",
     "dev:renderer": "npm --prefix apps/renderer run dev",
-    "typecheck": "npm --prefix apps/renderer run typecheck",
+    "typecheck": "npm --prefix apps/renderer run typecheck && node node_modules/typescript/bin/tsc -p apps/backend/tsconfig.json --noEmit",
     "test": "npm run test:unit && npm run test:smoke",
     "test:unit": "npm --prefix apps/renderer run test",
     "test:smoke": "node sidecar/smoke-backend.cjs",

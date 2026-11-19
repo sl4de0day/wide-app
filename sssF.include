@@ -242,19 +242,10 @@ capability extensions.manage {
 capability ai.egress {
   describe "Send request to cloud provider"
 
-  deny  when arg 0 matches /^(?!(gemini|deepseek|claude|claude-code|opencode|local)$)/  reason "Unrecognized provider"
+  deny  when arg 0 matches /^(?!(claude-code|antigravity|codex|local)$)/  reason "Unrecognized provider"
   allow always
 
   limit 120 per minute
-  audit always
-}
-
-capability ai.credential {
-  describe "Store provider API key"
-
-  allow always
-
-  limit 20 per minute
   audit always
 }
 
@@ -373,6 +364,20 @@ capability lsp.serve {
   audit always
 }
 
+capability recon.crawl {
+  describe "Wide spider crawling & URL discovery"
+
+  allow always
+  audit on deny
+}
+
+capability recon.audit {
+  describe "Wide passive audit, PathTrie normalization & scope checks"
+
+  allow always
+  audit on deny
+}
+
 capability ipc.default {
   describe "Unbound IPC channel"
 
@@ -402,6 +407,17 @@ bind "proxy:scope"       to proxy.intercept
 bind "proxy:traffic"     to proxy.intercept
 bind "proxy:clear"       to proxy.intercept
 bind "proxy:replay"      to proxy.intercept
+bind "recon:status"      to recon.audit
+bind "recon:crawlStart"  to recon.crawl
+bind "recon:crawlCancel" to recon.crawl
+bind "recon:auditResponse" to recon.audit
+bind "recon:normalizePaths" to recon.audit
+bind "recon:checkScope"  to recon.audit
+bind "recon:detectTech"  to recon.audit
+bind "recon:stateGraph"  to recon.audit
+bind "proxy:inspectTraffic" to recon.audit
+bind "proxy:inspectReport"  to recon.audit
+bind "proxy:testSmuggling"  to recon.audit
 bind "proxy:caCert"      to proxy.ca
 bind "debug:start"       to debug.launch { path = arg 1 }
 bind "debug:startBrowser" to debug.launch
@@ -474,9 +490,6 @@ bind "comments:language"  to fs.read { path = arg 0 }
 bind "ai:egress"        to ai.egress   { path = arg 0 }
 bind "ai:send"          to ai.models
 bind "ai:stop"          to ai.models
-bind "ai:verifyKey"     to ai.credential
-bind "ai:setKey"        to ai.credential
-bind "ai:keyStatus"     to ai.credential
 bind "ai:config"        to ai.models
 bind "ai:sessions"      to ai.models   { root = arg 0, path = arg 0 }
 bind "ai:session"       to ai.models
@@ -495,12 +508,20 @@ bind "ai:localRemove"   to ai.local
 bind "ai:claudeCodeStatus"  to ai.local
 bind "ai:claudeCodeInstall" to ai.local
 bind "ai:claudeCodeLogin"   to ai.local
-bind "ai:openCodeStatus"    to ai.local
-bind "ai:openCodeInstall"   to ai.local
-bind "ai:openCodeServer"    to ai.local
-bind "ai:openCodeStart"     to ai.local
-bind "ai:openCodeStop"      to ai.local
-bind "ai:openCodeModels"    to ai.models
+bind "ai:claudeCodeLogout"  to ai.local
+bind "ai:closeClaudeSession" to ai.local
+bind "ai:antigravityStatus"       to ai.local
+bind "ai:antigravityModels"       to ai.local
+bind "ai:antigravityInstall"      to ai.local
+bind "ai:antigravityLogin"        to ai.local
+bind "ai:antigravityAttachMcp"    to ai.local
+bind "ai:closeAntigravitySession" to ai.local
+bind "ai:codexStatus"             to ai.local
+bind "ai:codexModels"             to ai.models
+bind "ai:codexInstall"            to ai.local
+bind "ai:codexLogin"              to ai.local
+bind "ai:codexLogout"             to ai.local
+bind "ai:closeCodexSession"       to ai.local
 
 bind "ai:tool.list"     to ai.read   { root = arg 0, path = arg 1 }
 bind "ai:tool.read"     to ai.read   { root = arg 0, path = arg 1 }

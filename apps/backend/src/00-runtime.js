@@ -77,3 +77,27 @@ function sortEntries(entries) {
     return nameCollator.compare(a.name, b.name);
   });
 }
+
+function reportRecoverableError(scope, action, error, options = {}) {
+  if (typeof __wideTs === "object" && __wideTs && typeof __wideTs.reportRecoverableError === "function") {
+    __wideTs.reportRecoverableError(scope, action, error, {
+      ...options,
+      onFault: typeof reportFault === "function" ? reportFault : undefined,
+      logger: console,
+    });
+    return;
+  }
+  const errCode = error && typeof error === "object" && "code" in error ? String(error.code || "") : "";
+  if (Array.isArray(options.ignoreCodes) && errCode && options.ignoreCodes.includes(errCode)) {
+    return;
+  }
+  const message =
+    error && typeof error === "object" && typeof error.message === "string"
+      ? error.message
+      : String(error ?? "Unknown error");
+  if (options.level === "error") console.error(`[${scope}] ${action}: ${message}`);
+  else console.warn(`[${scope}] ${action}: ${message}`);
+  if (options.surfaceToUi && typeof reportFault === "function") {
+    reportFault(scope, `${action}: ${message}`);
+  }
+}

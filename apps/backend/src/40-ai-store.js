@@ -2,140 +2,75 @@
 
 const AI_CONFIG_FILE = () =>
   node_path.join(electron.app.getPath("userData"), "ai-config.json");
-const AI_KEYS_FILE = () =>
-  node_path.join(electron.app.getPath("userData"), "ai-keys.bin");
-const AI_KEYS_BACKUP_FILE = () =>
-  node_path.join(electron.app.getPath("userData"), "ai-keys.json");
 const AI_SESSION_DIR = () =>
   node_path.join(electron.app.getPath("userData"), "ai-sessions");
 const AI_ACTIVE_CHAT_FILE = () =>
   node_path.join(electron.app.getPath("userData"), "active-chat.json");
 
-const AI_PROVIDERS = new Set(["gemini", "deepseek", "claude"]);
+const AI_CLOUD_PROVIDERS = new Set(["claude-code", "antigravity", "codex"]);
 
 const AI_DEFAULT_CONFIG = {
 
   tab: "cloud",
-  provider: "deepseek",
+  provider: "claude-code",
   cloudModel: {
-    gemini: "gemini-3.7-flash",
-    deepseek: "deepseek-v4-pro",
-    claude: "",
     "claude-code": "",
-    opencode: "",
+    antigravity: "",
+    codex: "",
   },
   localModel: "",
 
   allowWrites: true,
+  toolMode: "full",
+  interactionMode: "agent",
+  allowBrowser: true,
 
   claudeCodeSignedIn: false,
+  claudeEffort: "high",
+  claudeFallbackModel: "sonnet",
+  antigravityEffort: "high",
+  codexEffort: "high",
 };
 
 let aiConfigCache = null;
+
+function aiNormalizeConfigRecord(parsed) {
+  const raw = parsed && typeof parsed === "object" ? parsed : {};
+  const rawProvider = String(raw.provider || "").trim().toLowerCase();
+  const provider = AI_CLOUD_PROVIDERS.has(rawProvider) ? rawProvider : AI_DEFAULT_CONFIG.provider;
+  const rawCloudModel = raw.cloudModel && typeof raw.cloudModel === "object" ? raw.cloudModel : {};
+  return {
+    ...AI_DEFAULT_CONFIG,
+    ...raw,
+    provider,
+    cloudModel: {
+      "claude-code": typeof rawCloudModel["claude-code"] === "string" ? rawCloudModel["claude-code"] : "",
+      antigravity: typeof rawCloudModel.antigravity === "string" ? rawCloudModel.antigravity : "",
+      codex: typeof rawCloudModel.codex === "string" ? rawCloudModel.codex : "",
+    },
+  };
+}
 
 async function readAiConfig() {
   if (aiConfigCache) return aiConfigCache;
   try {
     const parsed = JSON.parse(await promises.readFile(AI_CONFIG_FILE(), "utf8"));
-    aiConfigCache = { ...AI_DEFAULT_CONFIG, ...parsed, cloudModel: { ...AI_DEFAULT_CONFIG.cloudModel, ...(parsed.cloudModel ?? {}) } };
+    aiConfigCache = aiNormalizeConfigRecord(parsed);
   } catch {
-    aiConfigCache = { ...AI_DEFAULT_CONFIG, cloudModel: { ...AI_DEFAULT_CONFIG.cloudModel } };
+    aiConfigCache = aiNormalizeConfigRecord({});
   }
   return aiConfigCache;
 }
 
 async function writeAiConfig(next) {
-  aiConfigCache = next;
+  const normalized = aiNormalizeConfigRecord(next);
+  aiConfigCache = normalized;
   try {
-    await writeFileAtomic(AI_CONFIG_FILE(), JSON.stringify(next, null, 2), "utf8");
+    await writeFileAtomic(AI_CONFIG_FILE(), JSON.stringify(normalized, null, 2), "utf8");
   } catch (error) {
     console.warn("[ai] The settings could not be saved:", error.message);
   }
-  return next;
-}
-
-let aiKeyCache = null;
-
-function aiKeysAreLegacy(blob) {
-  const isLegacy = electron.safeStorage.isLegacyEncrypted;
-  return typeof isLegacy === "function" && isLegacy.call(electron.safeStorage, blob);
-}
-
-function secretsNeedReseal() {
-  const isStale = electron.safeStorage.isStaleSeal;
-  return typeof isStale === "function" && isStale.call(electron.safeStorage) === true;
-}
-
-let aiKeysUnreadable = false;
-
-async function readAiKeys() {
-  if (aiKeyCache) return aiKeyCache;
-  let rewrite = false;
-  try {
-    const blob = await promises.readFile(AI_KEYS_FILE());
-    aiKeyCache = JSON.parse(electron.safeStorage.decryptString(blob));
-    aiKeysUnreadable = false;
-    rewrite = aiKeysAreLegacy(blob) || secretsNeedReseal();
-  } catch (error) {
-    if (error && error.code !== "ENOENT") {
-      aiKeysUnreadable = true;
-      console.warn("[ai] The saved keys could not be read:", error.message);
-    }
-    try {
-      const backupText = await promises.readFile(AI_KEYS_BACKUP_FILE(), "utf8");
-      aiKeyCache = JSON.parse(backupText);
-      aiKeysUnreadable = false;
-    } catch {
-      aiKeyCache = {};
-    }
-  }
-  if (!aiKeyCache || typeof aiKeyCache !== "object") {
-    aiKeyCache = {};
-  }
-  if (rewrite) await writeAiKeys(aiKeyCache);
-  return aiKeyCache;
-}
-
-async function preserveUnreadable(file) {
-  for (let n = 1; n <= 20; n += 1) {
-    const kept = `${file}.unreadable-${n}`;
-    try {
-      await promises.access(kept);
-      continue;
-    } catch {
-      void 0;
-    }
-    try {
-      await promises.rename(file, kept);
-      console.warn(`[ai] The previous file could not be decrypted and was kept as ${kept}`);
-    } catch {
-      void 0;
-    }
-    return;
-  }
-}
-
-async function writeAiKeys(keys) {
-  aiKeyCache = keys;
-  if (aiKeysUnreadable) {
-    aiKeysUnreadable = false;
-    await preserveUnreadable(AI_KEYS_FILE());
-  }
-  try {
-    await writeFileAtomic(AI_KEYS_BACKUP_FILE(), JSON.stringify(keys, null, 2), "utf8");
-  } catch (error) {
-    console.warn("[ai] Backup keys could not be saved:", error.message);
-  }
-  try {
-    await writeFileAtomic(AI_KEYS_FILE(), electron.safeStorage.encryptString(JSON.stringify(keys)));
-  } catch (error) {
-    console.warn("[ai] The keys could not be saved:", error.message);
-  }
-}
-
-async function aiKeyFor(provider) {
-  const keys = await readAiKeys();
-  return typeof keys[provider] === "string" ? keys[provider] : "";
+  return normalized;
 }
 
 const AI_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -173,6 +108,12 @@ async function readAiSession(id) {
       title: parsed.title || sessionTitle(messages),
       createdAt: Number(parsed.createdAt) || 0,
       updatedAt: Number(parsed.updatedAt) || 0,
+      claudeSessionId: typeof parsed.claudeSessionId === "string" ? parsed.claudeSessionId : "",
+      claudeSyncedCount: typeof parsed.claudeSyncedCount === "number" ? parsed.claudeSyncedCount : 0,
+      antigravityConversationId: typeof parsed.antigravityConversationId === "string" ? parsed.antigravityConversationId : "",
+      antigravitySyncedCount: typeof parsed.antigravitySyncedCount === "number" ? parsed.antigravitySyncedCount : 0,
+      codexThreadId: typeof parsed.codexThreadId === "string" ? parsed.codexThreadId : "",
+      codexSyncedCount: typeof parsed.codexSyncedCount === "number" ? parsed.codexSyncedCount : 0,
       messages,
     };
   } catch {
@@ -185,6 +126,9 @@ async function writeAiSession(id, root, messages, stamp) {
   if (!file) return null;
   const trimmed = Array.isArray(messages) ? messages.slice(-MAX_SESSION_MESSAGES) : [];
   const existing = await readAiSession(id);
+  const prevSynced = typeof existing?.claudeSyncedCount === "number" ? existing.claudeSyncedCount : 0;
+  const prevAgySynced = typeof existing?.antigravitySyncedCount === "number" ? existing.antigravitySyncedCount : 0;
+  const prevCodexSynced = typeof existing?.codexSyncedCount === "number" ? existing.codexSyncedCount : 0;
   const record = {
     id: String(id),
     root: root || existing?.root || "",
@@ -192,6 +136,12 @@ async function writeAiSession(id, root, messages, stamp) {
     title: existing?.title || sessionTitle(trimmed),
     createdAt: existing?.createdAt || stamp,
     updatedAt: stamp,
+    claudeSessionId: existing?.claudeSessionId || "",
+    claudeSyncedCount: trimmed.length < prevSynced ? 0 : prevSynced,
+    antigravityConversationId: existing?.antigravityConversationId || "",
+    antigravitySyncedCount: trimmed.length < prevAgySynced ? 0 : prevAgySynced,
+    codexThreadId: existing?.codexThreadId || "",
+    codexSyncedCount: trimmed.length < prevCodexSynced ? 0 : prevCodexSynced,
     messages: trimmed,
   };
   try {
@@ -199,6 +149,102 @@ async function writeAiSession(id, root, messages, stamp) {
     await writeFileAtomic(file, JSON.stringify(record, null, 2), "utf8");
   } catch (error) {
     console.warn("[ai] The conversation could not be saved:", error.message);
+    return null;
+  }
+  return record;
+}
+
+async function getAiSessionClaudeMeta(id) {
+  const rec = await readAiSession(id);
+  return {
+    claudeSessionId: rec?.claudeSessionId || "",
+    claudeSyncedCount: typeof rec?.claudeSyncedCount === "number" ? rec.claudeSyncedCount : 0,
+  };
+}
+
+async function setAiSessionClaudeMeta(id, meta) {
+  const file = sessionFile(id);
+  if (!file) return null;
+  const existing = await readAiSession(id);
+  const now = Date.now();
+  const record = existing
+    ? { ...existing }
+    : { id: String(id), root: "", title: "", createdAt: now, updatedAt: now, messages: [] };
+  if (typeof meta?.claudeSessionId === "string") {
+    record.claudeSessionId = meta.claudeSessionId;
+  }
+  if (typeof meta?.claudeSyncedCount === "number") {
+    record.claudeSyncedCount = meta.claudeSyncedCount;
+  }
+  try {
+    await promises.mkdir(AI_SESSION_DIR(), { recursive: true });
+    await writeFileAtomic(file, JSON.stringify(record, null, 2), "utf8");
+  } catch (error) {
+    console.warn("[ai] The session metadata could not be saved:", error.message);
+    return null;
+  }
+  return record;
+}
+
+async function getAiSessionAntigravityMeta(id) {
+  const rec = await readAiSession(id);
+  return {
+    antigravityConversationId: rec?.antigravityConversationId || "",
+    antigravitySyncedCount: typeof rec?.antigravitySyncedCount === "number" ? rec.antigravitySyncedCount : 0,
+  };
+}
+
+async function setAiSessionAntigravityMeta(id, meta) {
+  const file = sessionFile(id);
+  if (!file) return null;
+  const existing = await readAiSession(id);
+  const now = Date.now();
+  const record = existing
+    ? { ...existing }
+    : { id: String(id), root: "", title: "", createdAt: now, updatedAt: now, messages: [] };
+  if (typeof meta?.antigravityConversationId === "string") {
+    record.antigravityConversationId = meta.antigravityConversationId;
+  }
+  if (typeof meta?.antigravitySyncedCount === "number") {
+    record.antigravitySyncedCount = meta.antigravitySyncedCount;
+  }
+  try {
+    await promises.mkdir(AI_SESSION_DIR(), { recursive: true });
+    await writeFileAtomic(file, JSON.stringify(record, null, 2), "utf8");
+  } catch (error) {
+    console.warn("[ai] The Antigravity session metadata could not be saved:", error.message);
+    return null;
+  }
+  return record;
+}
+
+async function getAiSessionCodexMeta(id) {
+  const rec = await readAiSession(id);
+  return {
+    codexThreadId: rec?.codexThreadId || "",
+    codexSyncedCount: typeof rec?.codexSyncedCount === "number" ? rec.codexSyncedCount : 0,
+  };
+}
+
+async function setAiSessionCodexMeta(id, meta) {
+  const file = sessionFile(id);
+  if (!file) return null;
+  const existing = await readAiSession(id);
+  const now = Date.now();
+  const record = existing
+    ? { ...existing }
+    : { id: String(id), root: "", title: "", createdAt: now, updatedAt: now, messages: [] };
+  if (typeof meta?.codexThreadId === "string") {
+    record.codexThreadId = meta.codexThreadId;
+  }
+  if (typeof meta?.codexSyncedCount === "number") {
+    record.codexSyncedCount = meta.codexSyncedCount;
+  }
+  try {
+    await promises.mkdir(AI_SESSION_DIR(), { recursive: true });
+    await writeFileAtomic(file, JSON.stringify(record, null, 2), "utf8");
+  } catch (error) {
+    console.warn("[ai] The Codex session metadata could not be saved:", error.message);
     return null;
   }
   return record;
@@ -248,30 +294,6 @@ function registerAiStoreHandlers() {
     return { ok: true, config: await writeAiConfig(next) };
   });
 
-  electron.ipcMain.handle("ai:keyStatus", async () => {
-    const gate = await requireInstalled("ai-assistant");
-    if (gate) return gate;
-    const keys = await readAiKeys();
-    const configured = {};
-    for (const provider of AI_PROVIDERS) {
-      configured[provider] = Boolean(keys[provider]);
-    }
-    return { ok: true, configured };
-  });
-
-  electron.ipcMain.handle("ai:setKey", async (_event, provider, key) => {
-    const gate = await requireInstalled("ai-assistant");
-    if (gate) return gate;
-    if (!AI_PROVIDERS.has(provider)) return { ok: false, error: "There is no such provider." };
-
-    const keys = { ...(await readAiKeys()) };
-    const value = typeof key === "string" ? key.trim() : "";
-    if (value) keys[provider] = value;
-    else delete keys[provider];
-    await writeAiKeys(keys);
-    return { ok: true, configured: Boolean(value) };
-  });
-
   electron.ipcMain.handle("ai:sessions", async (_event, root) => {
     const gate = await requireInstalled("ai-assistant");
     if (gate) return gate;
@@ -309,6 +331,15 @@ function registerAiStoreHandlers() {
     if (gate) return gate;
     const file = sessionFile(id);
     if (!file) return { ok: false, error: "There is no such conversation." };
+    if (typeof aiCloseClaudeSession === "function") {
+      aiCloseClaudeSession(id);
+    }
+    if (typeof aiCloseAntigravitySession === "function") {
+      aiCloseAntigravitySession(id);
+    }
+    if (typeof aiCloseCodexSession === "function") {
+      aiCloseCodexSession(id);
+    }
     try {
       await promises.rm(file, { force: true });
     } catch {
@@ -350,7 +381,9 @@ function registerAiStoreHandlers() {
       try {
         const activeData = JSON.parse(await promises.readFile(AI_ACTIVE_CHAT_FILE(), "utf8"));
         if (activeData?.id) chatId = String(activeData.id);
-      } catch {}
+      } catch (error) {
+        reportRecoverableError("ai-store", "read active-chat failed", error, { ignoreCodes: ["ENOENT"] });
+      }
     }
 
     if (chatId) {
@@ -384,7 +417,9 @@ function registerAiStoreHandlers() {
             await promises.mkdir(sDir, { recursive: true });
             await writeFileAtomic(node_path.join(sDir, `${safe}.json`), sessionJson, "utf8");
             await writeFileAtomic(node_path.join(dir, "active-chat.json"), activeJson, "utf8");
-          } catch {}
+          } catch (error) {
+            reportRecoverableError("ai-store", "sync active chat failed", error, { ignoreCodes: ["EACCES", "EPERM"] });
+          }
         }
       }
     }

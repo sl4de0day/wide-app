@@ -16,3 +16,4 @@ scratch/
 Thumbs.db
 
 native-host/target/
+native-core/target/
