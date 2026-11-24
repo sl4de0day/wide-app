@@ -1,5 +1,7 @@
 
 
+let secScanApi = null;
+
 function registerSecScanHandlers() {
   const SEC_IGNORE = new Set([
     ".git", ".hg", ".svn", "node_modules", "dist", "out", "build", ".next", ".nuxt", ".svelte-kit",
@@ -4460,9 +4462,8 @@ function registerSecScanHandlers() {
     for (const candidate of bundledCandidates) {
       try {
         const raw = JSON.parse(await promises.readFile(candidate, "utf8"));
-        const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
-        const filtered = list.filter((r) => r && (r.category === "AI_SECURITY" || String(r.id).includes("ai-")));
-        if (filtered.length > 0) return { ok: true, source: candidate, count: filtered.length, rules: filtered };
+        const rules = parseCustomRules(raw);
+        if (rules.length > 0) return { ok: true, source: candidate, count: rules.length };
       } catch (error) {
         reportRecoverableError("secscan", "load bundled rules candidate failed", error, { ignoreCodes: ["ENOENT"] });
       }
@@ -4519,7 +4520,7 @@ function registerSecScanHandlers() {
         const raw = JSON.parse(await promises.readFile(wsAgentFile, "utf8"));
         const rules = parseCustomRules(raw);
         if (rules.length > 0) {
-          const list = Array.isArray(raw) ? raw : [];
+          const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.rules) ? raw.rules : []);
           const merged = typeof aiMergeEmbeddedAgentRules === "function" ? aiMergeEmbeddedAgentRules(list) : list;
           return { ok: true, source: wsAgentFile, count: merged.length, rules: merged };
         }
@@ -4594,6 +4595,7 @@ function registerSecScanHandlers() {
     };
   });
 
+  secScanApi = { secScanFile, secScanProject, readSecOsv, auditManifest };
   loadCachedRemoteOsv().catch(() => {});
   if (process.env.WIDE_NO_AUTO_RULES_SYNC !== "1" && !process.argv.some((a) => String(a).includes("smoke"))) {
     const timer = setTimeout(() => {

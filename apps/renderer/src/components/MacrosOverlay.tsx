@@ -268,7 +268,7 @@ export function MacrosOverlay() {
                   key={index}
                   className={cn(
                     "rounded-sm px-1.5 py-0.5 font-mono text-[10px]",
-                    result.ok ? "bg-emerald-500/10 text-emerald-300" : "bg-rose-500/10 text-rose-300",
+                    result.ok ? "bg-status-ok/10 text-status-ok" : "bg-status-error/10 text-status-error",
                   )}
                   title={t(result.error ?? "")}
                 >

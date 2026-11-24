@@ -246,6 +246,7 @@ export function forgetProjectInstructions(_projectRoot?: string): void {}
 
 let turnCounter = 0;
 let imageCounter = 0;
+let searchToken = 0;
 const turnId = (sessionId: string) => `${sessionId}#${(turnCounter += 1)}`;
 const sessionOf = (id: string) => id.split("#")[0];
 
@@ -426,6 +427,10 @@ export const useAi = create<AiState>((set, get) => ({
       root: folderPath,
       rootName: folderName,
       folders: [{ path: folderPath, name: folderName }],
+      workflowPath: null,
+      workflowName: "",
+      children: {},
+      expanded: new Set(),
     });
     void bridge.openRecentProject(folderPath);
 
@@ -465,6 +470,10 @@ export const useAi = create<AiState>((set, get) => ({
           root: existing.root,
           rootName: basename(existing.root),
           folders: [{ path: existing.root, name: basename(existing.root) }],
+          workflowPath: null,
+          workflowName: "",
+          children: {},
+          expanded: new Set(),
         });
         void bridge.openRecentProject(existing.root);
       }
@@ -480,6 +489,10 @@ export const useAi = create<AiState>((set, get) => ({
         root: sessionRoot,
         rootName: basename(sessionRoot),
         folders: [{ path: sessionRoot, name: basename(sessionRoot) }],
+        workflowPath: null,
+        workflowName: "",
+        children: {},
+        expanded: new Set(),
       });
       void bridge.openRecentProject(sessionRoot);
     }
@@ -601,14 +614,28 @@ export const useAi = create<AiState>((set, get) => ({
     const parts: string[] = [];
     const missing: string[] = [];
     for (const path of attachments) {
+      let attached = false;
       try {
         const file = await bridge.readFile(path);
         if (file && !file.error && !file.tooLarge && file.content != null) {
           parts.push(`=== ${path} ===\n${file.content}`);
-        } else {
-          missing.push(path);
+          attached = true;
         }
-      } catch {
+      } catch {}
+      if (!attached) {
+        try {
+          const entries = await bridge.readDir(path);
+          if (Array.isArray(entries)) {
+            const listing = entries
+              .slice(0, 200)
+              .map((entry) => `${entry.isDirectory ? "[dir]" : "[file]"} ${entry.name}`)
+              .join("\n");
+            parts.push(`=== ${path} (directory) ===\n${listing || "(empty directory)"}`);
+            attached = true;
+          }
+        } catch {}
+      }
+      if (!attached) {
         missing.push(path);
       }
     }
@@ -636,6 +663,10 @@ export const useAi = create<AiState>((set, get) => ({
         root: projectRoot,
         rootName: folderName,
         folders: [{ path: projectRoot, name: folderName }],
+        workflowPath: null,
+        workflowName: "",
+        children: {},
+        expanded: new Set(),
       });
       void bridge.openRecentProject(projectRoot);
     }
@@ -927,10 +958,9 @@ export const useAi = create<AiState>((set, get) => ({
         const isModifyingStep =
           isAiEditStepName(step.name) ||
           step.name === "delete_file" ||
-          step.oldContent !== undefined ||
-          step.newContent !== undefined;
+          step.oldContent !== undefined;
 
-        if (isModifyingStep && !fileRollbackMap.has(path)) {
+        if (isModifyingStep && (step.oldContent !== undefined || step.existed === false) && !fileRollbackMap.has(path)) {
           fileRollbackMap.set(path, {
             path,
             root: projectRoot,
@@ -987,7 +1017,14 @@ export const useAi = create<AiState>((set, get) => ({
     toast.success(t("Rolled back changes and restored chat to this point."));
   },
 
-  setQuery: (query) => set({ query }),
+  setQuery: (query) => {
+    searchToken += 1;
+    if (query.trim().length < 2) {
+      set({ query, results: [], searching: false });
+    } else {
+      set({ query });
+    }
+  },
 
   search: async () => {
     const query = get().query.trim();
@@ -995,15 +1032,23 @@ export const useAi = create<AiState>((set, get) => ({
       set({ results: [], searching: false });
       return;
     }
+    const token = ++searchToken;
     set({ searching: true });
-    const reply = await bridge.aiSearch(query, 20);
-
-    if (get().query.trim() !== query) return;
-    set({
-      searching: false,
-      results: reply.ok ? (reply.results ?? []) : [],
-      error: reply.ok ? "" : (reply.error ?? ""),
-    });
+    try {
+      const reply = await bridge.aiSearch(query, 20);
+      if (token !== searchToken || get().query.trim() !== query) return;
+      set({
+        searching: false,
+        results: reply.ok ? (reply.results ?? []) : [],
+        error: reply.ok ? "" : (reply.error ?? ""),
+      });
+    } catch (err) {
+      if (token !== searchToken) return;
+      set({
+        searching: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   },
 
   expand: async (id, source) => {

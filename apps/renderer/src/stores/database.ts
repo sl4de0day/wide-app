@@ -228,6 +228,7 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
   setQueryText: (queryText) => set({ queryText }),
 
   selectConnection: (id) => {
+    const prevId = get().activeConnectionId;
     const conn = get().connections.find((c) => c.id === id);
     const nextSubView: DbSubView =
       conn?.engine === "redis"
@@ -235,7 +236,24 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
         : get().subView === "redis"
           ? "console"
           : get().subView;
-    set({ activeConnectionId: id, subView: nextSubView });
+    set({
+      activeConnectionId: id,
+      subView: nextSubView,
+      ...(id !== prevId
+        ? {
+            selectedTable: null,
+            gridResult: null,
+            gridError: null,
+            pendingEdits: {},
+            pendingDeletes: {},
+            pendingInserts: [],
+            auditFindings: [],
+            auditSummary: null,
+            redisItems: [],
+            redisSelected: null,
+          }
+        : {}),
+    });
   },
 
   loadConnections: async () => {
@@ -245,9 +263,19 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
       if (res.ok && Array.isArray(res.connections)) {
         const current = get().activeConnectionId;
         const stillExists = res.connections.some((c) => c.id === current);
+        const nextActiveId = stillExists ? current : res.connections[0]?.id ?? null;
+        const nextConn = res.connections.find((c) => c.id === nextActiveId);
+        const curSub = get().subView;
+        const nextSubView: DbSubView =
+          nextConn?.engine === "redis"
+            ? "redis"
+            : curSub === "redis" && nextConn
+              ? "console"
+              : curSub;
         set({
           connections: res.connections,
-          activeConnectionId: stillExists ? current : res.connections[0]?.id ?? null,
+          activeConnectionId: nextActiveId,
+          subView: nextSubView,
         });
       }
       await get().loadHistory();
@@ -289,9 +317,24 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
     set((state) => {
       const nextSchemas = { ...state.schemas };
       delete nextSchemas[id];
+      const wasActive = state.activeConnectionId === id;
       return {
         schemas: nextSchemas,
-        activeConnectionId: state.activeConnectionId === id ? null : state.activeConnectionId,
+        activeConnectionId: wasActive ? null : state.activeConnectionId,
+        ...(wasActive
+          ? {
+              selectedTable: null,
+              gridResult: null,
+              gridError: null,
+              pendingEdits: {},
+              pendingDeletes: {},
+              pendingInserts: [],
+              auditFindings: [],
+              auditSummary: null,
+              redisItems: [],
+              redisSelected: null,
+            }
+          : {}),
       };
     });
     await get().loadConnections();
@@ -356,7 +399,10 @@ export const useDatabase = create<DatabaseState>((set, get) => ({
     const trimmedFilter = gridFilter.trim();
     if (trimmedFilter) {
       const schemaObj = schemas[activeConnectionId];
-      const tblMeta: DbTableMeta | undefined = schemaObj?.tables.find(
+      const tblMeta: DbTableMeta | undefined = [
+        ...(schemaObj?.tables || []),
+        ...(schemaObj?.views || []),
+      ].find(
         (t) => t.name === selectedTable.table && t.schema === selectedTable.schema
       );
       const cols = (tblMeta?.columns || []).slice(0, 12);

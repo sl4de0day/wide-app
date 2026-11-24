@@ -159,7 +159,7 @@ export function VaultView() {
                     type="button"
                     aria-label={t("Remove")}
                     title={t("Remove")}
-                    className="rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-rose-300"
+                    className="rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-status-error"
                     onClick={() => void useVault.getState().remove(entry.id)}
                   >
                     <Trash2 className="size-3" strokeWidth={1.75} />

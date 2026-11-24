@@ -136,7 +136,13 @@ const shell = {
   showItemInFolder(p) {
     Promise.resolve(bridge.hostRequest('shell:showItemInFolder', { path: p })).catch(() => {});
   },
-  async trashItem(p) { return bridge.hostRequest('shell:trashItem', { path: p }); },
+  async trashItem(p) {
+    const res = await bridge.hostRequest('shell:trashItem', { path: p });
+    if (res && res.ok === false) {
+      throw new Error(res.error || 'Failed to move item to trash.');
+    }
+    return res;
+  },
 };
 
 const ENC_MAGIC = Buffer.from('WSS1');
@@ -408,6 +414,14 @@ const app = {
     runShutdown().catch(() => {}).finally(() => process.exit(0));
   },
   getAppPath() { return projectRoot; },
+  getVersion() {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
+      return String(pkg.version || '0.0.0');
+    } catch {
+      return '0.0.0';
+    }
+  },
   getPath(name) {
     switch (name) {
       case 'userData': return userDataDir();

@@ -324,14 +324,14 @@ export function ToolsPanel() {
       </div>
 
       {failure && (
-        <div className="wide-enter-fade flex items-center justify-between gap-2 border-b border-line bg-rose-500/10 px-3 py-1.5 text-[11px] leading-snug text-rose-300">
+        <div className="wide-enter-fade flex items-center justify-between gap-2 border-b border-line bg-status-error/10 px-3 py-1.5 text-[11px] leading-snug text-status-error">
           <span className="min-w-0 flex-1 truncate">{t(failure)}</span>
           <button
             type="button"
             onClick={() => useExtensions.setState({ error: null })}
             title={t("Dismiss")}
             aria-label={t("Dismiss")}
-            className="shrink-0 text-rose-300/80 hover:text-rose-200"
+            className="shrink-0 text-status-error/80 hover:text-status-error"
           >
             <X className="size-3" strokeWidth={2} />
           </button>

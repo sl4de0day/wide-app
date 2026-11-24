@@ -91,7 +91,7 @@ export function RunnerDialog({ collection, onClose }: { collection: Collection; 
             <span className="text-[10px] tabular-nums text-fg-faint">{progress.done}/{progress.total}</span>
             {results.length > 0 && (
               <span className="text-[10px] tabular-nums">
-                <span className="text-emerald-400">{totalPass} {t("passed")}</span>
+                <span className="text-status-ok">{totalPass} {t("passed")}</span>
                 {totalFail > 0 && <span className="text-status-error"> · {totalFail} {t("failed")}</span>}
               </span>
             )}
@@ -104,7 +104,7 @@ export function RunnerDialog({ collection, onClose }: { collection: Collection; 
               <tbody className="font-mono">
                 {results.map((r, i) => {
                   const fail = r.tests.filter((x) => !x.passed).length;
-                  const tone = !r.ok || fail > 0 ? "text-status-error" : "text-emerald-400";
+                  const tone = !r.ok || fail > 0 ? "text-status-error" : "text-status-ok";
                   return (
                     <tr key={i} className="border-b border-line/40">
                       <td className="py-1 pl-2 pr-1 text-fg-faint tabular-nums">#{r.iteration + 1}</td>
@@ -114,7 +114,7 @@ export function RunnerDialog({ collection, onClose }: { collection: Collection; 
                       <td className="py-1 pr-2 tabular-nums text-fg-faint">{r.ms} ms</td>
                       <td className="py-1 pr-2">
                         {r.tests.length > 0 && (
-                          <span className={fail > 0 ? "text-status-error" : "text-emerald-400"}>{r.tests.length - fail}/{r.tests.length}</span>
+                          <span className={fail > 0 ? "text-status-error" : "text-status-ok"}>{r.tests.length - fail}/{r.tests.length}</span>
                         )}
                         {r.error && <span className="text-status-error"> {t(r.error)}</span>}
                       </td>
@@ -133,12 +133,12 @@ export function RunnerDialog({ collection, onClose }: { collection: Collection; 
 function methodTone(m: string): string {
   switch (m) {
     case "GET":
-      return "text-emerald-400";
+      return "text-status-ok";
     case "POST":
-      return "text-amber-400";
+      return "text-status-warn";
     case "PUT":
     case "PATCH":
-      return "text-sky-400";
+      return "text-status-info";
     case "DELETE":
       return "text-status-error";
     default:

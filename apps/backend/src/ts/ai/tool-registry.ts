@@ -45,6 +45,13 @@ export const AI_WRITE_TOOLS = new Set<string>([
   "engine_control",
   "wide_custom_tool_run",
   "run_tests",
+  "catcher_intercept_decide",
+  "catcher_match_replace",
+  "intruder_attack",
+  "browser_eval",
+  "pitcher_env",
+  "findings_baseline",
+  "debug_control",
 ]);
 
 export const AI_SECURITY_TOOLS = new Set<string>([

@@ -7,24 +7,17 @@ import { AiPanel } from "./panels/AiPanel";
 const AiChatView = lazy(() => import("./components/AiChatView").then((m) => ({ default: m.AiChatView })));
 const DatabaseView = lazy(() => import("./components/DatabaseView").then((m) => ({ default: m.DatabaseView })));
 const DatabasePanel = lazy(() => import("./panels/DatabasePanel").then((m) => ({ default: m.DatabasePanel })));
+const DatabaseConnectionModal = lazy(() => import("./panels/DatabasePanel").then((m) => ({ default: m.DatabaseConnectionModal })));
 const SettingsView = lazy(() => import("./components/SettingsView").then((m) => ({ default: m.SettingsView })));
 import { CommandPalette } from "./components/CommandPalette";
-import { useTabSwitcher } from "./stores/tabSwitcher";
 import { RecentProjectsOverlay } from "./components/RecentProjectsOverlay";
 import { useRecentProjects } from "./stores/recentProjects";
-import { useTransformModal } from "./stores/transform";
-import { transformSelection } from "./lib/transformSelection";
-import { base64Decode, base64Encode, hexDecode, hexEncode, htmlDecode, htmlEncode, md5Hex, urlDecode, urlEncode } from "./lib/codec";
-import { useDecoder } from "./stores/decoder";
-import { useComparer } from "./stores/comparer";
-import { useCatcher } from "./stores/catcher";
-import { useMacros } from "./stores/macros";
+import { useDatabase } from "./stores/database";
 import { subscribeProjectScan, useProjectScan } from "./stores/projectScan";
 import { AiEditsOverlay } from "./components/AiEditsOverlay";
 import { McpTrustPrompt } from "./components/McpTrustPrompt";
 import { useAiEdits } from "./stores/aiEdits";
 import { sendSelectionToChat } from "./lib/sendToChat";
-import { selectedText } from "./editor/activeView";
 import { copyConversation, exportConversation } from "./lib/chatExport";
 import { TitleBar } from "./components/TitleBar";
 import { bridge } from "./lib/bridge";
@@ -47,8 +40,6 @@ import { subscribeOast } from "./stores/oast";
 import { subscribeDiscordPresence } from "./stores/discordPresence";
 import { useExtensions } from "./stores/extensions";
 import { useSession } from "./stores/session";
-import { useSymbolSearch } from "./stores/symbolSearch";
-import { useQuickOpen } from "./stores/quickOpen";
 import { comboOf, useCommandPalette } from "./stores/commands";
 import { resetEslintState } from "./editor/features/eslint";
 import { resetLspState, subscribeLspDiagnostics } from "./editor/features/lsp";
@@ -131,8 +122,18 @@ function SssfDegradedNotice() {
 function BootGate() {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas">
-      <img src={logo} alt="Wide" width={432} height={432} className="size-[432px] select-none animate-pulse" draggable={false} />
+      <img src={logo} alt="Wide" width={432} height={432} className="size-[432px] select-none wide-enter-fade" draggable={false} />
     </div>
+  );
+}
+
+function DatabaseModalHost() {
+  const open = useDatabase((s) => s.modalOpen);
+  if (!open) return null;
+  return (
+    <Suspense fallback={null}>
+      <DatabaseConnectionModal />
+    </Suspense>
   );
 }
 
@@ -209,18 +210,6 @@ export default function App() {
       } else if (key === "," && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         useEditor.getState().openSettings();
-      } else if (key === "e" && event.altKey) {
-        event.preventDefault();
-        useTransformModal.getState().openModal();
-      } else if (key === "tab") {
-        event.preventDefault();
-        const switcher = useTabSwitcher.getState();
-        if (switcher.isOpen) {
-          if (event.shiftKey) switcher.prev();
-          else switcher.next();
-        } else {
-          switcher.open();
-        }
       } else if (event.altKey && event.shiftKey && key === "f") {
         event.preventDefault();
         void formatActive();
@@ -233,24 +222,9 @@ export default function App() {
           const newId = await useAi.getState().newSession();
           if (newId) useEditor.getState().openAiChat(newId, t("New conversation"));
         })();
-      } else if (key === "d" && event.shiftKey && !event.altKey) {
-        event.preventDefault();
-        const snippet = selectedText();
-        useDecoder.getState().openDecoder(snippet);
-      } else if (key === "t" && !event.shiftKey && !event.altKey) {
-
-        event.preventDefault();
-        if (useWorkspace.getState().root) useSymbolSearch.getState().openSearch();
-        else toast.info(t("Open a folder to search its symbols."));
       } else if (key === "p" && event.shiftKey) {
-
         event.preventDefault();
         useCommandPalette.getState().openPalette();
-      } else if (key === "p" && !event.altKey) {
-
-        event.preventDefault();
-        if (useWorkspace.getState().root) useQuickOpen.getState().openPalette();
-        else toast.info(t("Open a folder to quick-open its files."));
       } else if (key === "=" || key === "+") {
 
 
@@ -373,8 +347,14 @@ export default function App() {
     void useAi.getState().load();
   }, []);
 
-  const activeTab = useEditor((state) => state.tabs.find((t) => t.path === state.activePath));
-  const activeAiChatId = activeTab?.kind === "ai-chat" ? activeTab.path.slice(AI_CHAT_PATH.length) : null;
+  const activeAiChatId = useEditor((state) => {
+    const active = state.tabs.find((t) => t.path === state.activePath);
+    if (active?.kind === "ai-chat") return active.path.slice(AI_CHAT_PATH.length);
+    for (let i = state.tabs.length - 1; i >= 0; i -= 1) {
+      if (state.tabs[i].kind === "ai-chat") return state.tabs[i].path.slice(AI_CHAT_PATH.length);
+    }
+    return null;
+  });
 
 
 
@@ -491,39 +471,9 @@ export default function App() {
       { id: "file.closeOthers", title: "Close Other Tabs", group: "File", run: () => { const a = useEditor.getState().activePath; if (a) void requestCloseOthers(a); } },
       { id: "file.closeAll", title: "Close All Tabs", group: "File", run: () => void requestCloseAll() },
       { id: "view.settings", title: "Settings", group: "View", key: "ctrl+,", run: () => useEditor.getState().openSettings() },
-      { id: "view.split", title: "Toggle split editor", group: "View", run: () => useEditor.getState().toggleSplit() },
-      { id: "view.splitRight", title: "Split Editor Right", group: "View", key: "ctrl+\\", run: () => { const ed = useEditor.getState(); ed.splitPane(ed.activePaneId, "vertical"); } },
-      { id: "view.splitDown", title: "Split Editor Down", group: "View", key: "ctrl+k ctrl+\\", run: () => { const ed = useEditor.getState(); ed.splitPane(ed.activePaneId, "horizontal"); } },
-      { id: "view.closePane", title: "Close Active Editor Pane", group: "View", run: () => { const ed = useEditor.getState(); ed.closePane(ed.activePaneId); } },
-      { id: "view.layout.single", title: "Editor Layout: Single (1x1)", group: "View", run: () => useEditor.getState().setGridPreset("1x1") },
-      { id: "view.layout.twoColumns", title: "Editor Layout: Two Columns (1x2)", group: "View", run: () => useEditor.getState().setGridPreset("1x2") },
-      { id: "view.layout.twoRows", title: "Editor Layout: Two Rows (2x1)", group: "View", run: () => useEditor.getState().setGridPreset("2x1") },
-      { id: "view.layout.grid", title: "Editor Layout: 2x2 Grid", group: "View", run: () => useEditor.getState().setGridPreset("2x2") },
-      { id: "view.layout.threeColumns", title: "Editor Layout: Three Columns (1x3)", group: "View", run: () => useEditor.getState().setGridPreset("1x3") },
-      { id: "view.layout.threeRows", title: "Editor Layout: Three Rows (3x1)", group: "View", run: () => useEditor.getState().setGridPreset("3x1") },
-      { id: "view.nextPane", title: "Focus Next Editor Pane", group: "View", key: "f6", run: () => useEditor.getState().focusNextPane() },
-      { id: "view.prevPane", title: "Focus Previous Editor Pane", group: "View", key: "shift+f6", run: () => useEditor.getState().focusPrevPane() },
+      { id: "view.database", title: "Database", group: "View", run: () => { setSidebarTab("db"); useEditor.getState().openDatabase(); } },
       { id: "file.openFolder", title: "Open folder", group: "File", key: "ctrl+o", run: () => void useWorkspace.getState().openFolder() },
       { id: "file.openRecent", title: "Open Recent Project…", group: "File", key: "ctrl+r", run: () => useRecentProjects.getState().open() },
-      { id: "go.file", title: "Go to File…", group: "Go", key: "ctrl+p", when: hasRoot, run: () => useQuickOpen.getState().openPalette() },
-      { id: "go.symbol", title: "Go to Symbol in Project…", group: "Go", key: "ctrl+t", when: hasRoot, run: () => useSymbolSearch.getState().openSearch() },
-      { id: "tool.decoder", title: "Decoder / JWT", group: "Tools", run: () => useDecoder.getState().openDecoder() },
-      { id: "tool.decoderSelection", title: "Quick Decode Selection…", group: "Tools", key: "ctrl+shift+d", run: () => useDecoder.getState().openDecoder(selectedText()) },
-      { id: "tool.sendPitcher", title: "Send Selection to Pitcher", group: "Tools", key: "ctrl+alt+p", run: () => { useEditor.getState().openPitcher(); } },
-      { id: "editor.pinTab", title: "Toggle Pin Active Tab", group: "View", run: () => { const p = useEditor.getState().activePath; if (p) useEditor.getState().togglePinTab(p); } },
-      { id: "tool.transform", title: "Transform Selection…", group: "Tools", key: "ctrl+alt+e", run: () => useTransformModal.getState().openModal() },
-      { id: "tool.transform.urle", title: "Transform: URL Encode Selection", group: "Tools", run: () => transformSelection(urlEncode) },
-      { id: "tool.transform.urld", title: "Transform: URL Decode Selection", group: "Tools", run: () => transformSelection(urlDecode) },
-      { id: "tool.transform.b64e", title: "Transform: Base64 Encode Selection", group: "Tools", run: () => transformSelection(base64Encode) },
-      { id: "tool.transform.b64d", title: "Transform: Base64 Decode Selection", group: "Tools", run: () => transformSelection(base64Decode) },
-      { id: "tool.transform.hexe", title: "Transform: Hex Encode Selection", group: "Tools", run: () => transformSelection(hexEncode) },
-      { id: "tool.transform.hexd", title: "Transform: Hex Decode Selection", group: "Tools", run: () => transformSelection(hexDecode) },
-      { id: "tool.transform.htmle", title: "Transform: HTML Entity Encode", group: "Tools", run: () => transformSelection(htmlEncode) },
-      { id: "tool.transform.htmld", title: "Transform: HTML Entity Decode", group: "Tools", run: () => transformSelection(htmlDecode) },
-      { id: "tool.transform.md5", title: "Transform: MD5 Hash Selection", group: "Tools", run: () => transformSelection(md5Hex) },
-      { id: "tool.comparer", title: "Comparer", group: "Tools", run: () => useComparer.getState().openComparer() },
-      { id: "catcher.intruder", title: "Catcher: Intruder", group: "Catcher", run: () => useCatcher.getState().show("intruder") },
-      { id: "tool.macros", title: "Session macros", group: "Tools", run: () => useMacros.getState().openMacros() },
       { id: "view.ai", title: "AI Assistant", group: "View", when: () => has("ai-assistant"), run: () => setSidebarTab("ai") },
       { id: "ai.newChat", title: "New AI conversation", group: "AI", key: "ctrl+l", when: () => has("ai-assistant"), run: async () => { const newId = await useAi.getState().newSession(); if (newId) useEditor.getState().openAiChat(newId, t("New conversation")); } },
       { id: "ai.review", title: "Toggle: Review AI edits before applying", group: "AI", when: () => has("ai-assistant"), run: () => useAiEdits.getState().setReview(!useAiEdits.getState().reviewEnabled) },
@@ -550,14 +500,7 @@ export default function App() {
         },
       },
       { id: "security.projectScan", title: "Scan project for cross-file vulnerabilities", group: "Security", when: hasRoot, run: () => void useProjectScan.getState().run() },
-      { id: "view.catcher", title: "Catcher", group: "View", run: () => useEditor.getState().openCatcher() },
-      { id: "view.pitcher", title: "Pitcher", group: "View", run: () => useEditor.getState().openPitcher() },
-      { id: "view.browser", title: "Browser", group: "View", run: () => useEditor.getState().openBrowser() },
       { id: "view.ai-browser", title: "AI Browser Stream", group: "View", run: () => useAiBrowser.getState().toggleDrawer() },
-      { id: "view.scratchpad", title: "Scratchpad", group: "View", key: "ctrl+alt+n", run: () => useEditor.getState().openScratchpad() },
-      { id: "catcher.proxy", title: "Catcher: Proxy", group: "Catcher", run: () => useCatcher.getState().show("proxy") },
-      { id: "catcher.target", title: "Catcher: Target (Site Map)", group: "Catcher", run: () => useCatcher.getState().show("target") },
-      { id: "catcher.repeater", title: "Catcher: Repeater", group: "Catcher", run: () => useCatcher.getState().show("repeater") },
     ]);
   }, [t]);
 
@@ -576,7 +519,7 @@ export default function App() {
               onClick={() => setSidebarTab("ai")}
               className={cn(
                 "flex-1 rounded px-2 py-1 transition-colors",
-                sidebarTab === "ai" ? "bg-surface text-ink" : "text-fg-dim hover:text-ink"
+                sidebarTab === "ai" ? "bg-selected text-fg-bright" : "text-fg-dim hover:text-fg"
               )}
             >
               {t("AI Assistant")}
@@ -586,7 +529,7 @@ export default function App() {
               onClick={() => setSidebarTab("db")}
               className={cn(
                 "flex flex-1 items-center justify-center gap-1 rounded px-2 py-1 transition-colors",
-                sidebarTab === "db" ? "bg-surface text-ink" : "text-fg-dim hover:text-ink"
+                sidebarTab === "db" ? "bg-selected text-fg-bright" : "text-fg-dim hover:text-fg"
               )}
             >
               <Database className="size-3" />
@@ -696,6 +639,7 @@ export default function App() {
       <Toasts />
       <CrashReportDialog />
       <AiBrowserDrawer />
+      <DatabaseModalHost />
     </div>
   );
 }

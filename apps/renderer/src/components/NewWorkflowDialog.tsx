@@ -186,7 +186,7 @@ export function NewWorkflowDialog({ onClose }: { onClose: () => void }) {
               <span className="shrink-0 font-mono text-[13px] text-fg-faint">.wideflow</span>
             </div>
           </label>
-          {problem && <p className="pt-1 text-[11px] text-rose-300">{t(problem)}</p>}
+          {problem && <p className="pt-1 text-[11px] text-status-error">{t(problem)}</p>}
 
           <div className="pt-3">
             <span className="text-[11px] text-fg-dim">{t("Save the workflow in")}</span>
@@ -216,7 +216,7 @@ export function NewWorkflowDialog({ onClose }: { onClose: () => void }) {
             </p>
           </div>
 
-          {error && <p className="pt-2 text-[11px] text-rose-300">{t(error)}</p>}
+          {error && <p className="pt-2 text-[11px] text-status-error">{t(error)}</p>}
         </div>
 
         <div className="flex shrink-0 items-center gap-2 border-t border-line px-4 py-2.5">

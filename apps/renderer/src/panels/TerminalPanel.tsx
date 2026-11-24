@@ -176,10 +176,10 @@ export function TerminalPanel() {
           let m: RegExpExecArray | null;
           while ((m = fileRe.exec(line)) !== null) {
             const raw = m[0].replace(/[.,;:)\]]+$/, "");
-            const parts = raw.split(":");
-            const filePath = parts[0];
-            const lineNum = parts[1] ? parseInt(parts[1], 10) : undefined;
-            const colNum = parts[2] ? parseInt(parts[2], 10) : undefined;
+            const parsed = /^(.+?)(?::(\d+)(?::(\d+))?)?$/.exec(raw);
+            const filePath = parsed ? parsed[1] : raw;
+            const lineNum = parsed?.[2] ? parseInt(parsed[2], 10) : undefined;
+            const colNum = parsed?.[3] ? parseInt(parsed[3], 10) : undefined;
             links.push({
               range: { start: { x: m.index + 1, y: bufferLine }, end: { x: m.index + raw.length, y: bufferLine } },
               text: raw,
@@ -442,10 +442,10 @@ export function TerminalPanel() {
     return () => observer.disconnect();
   }, [activeSession, activeId]);
 
+  const hasRunningPty = tabs.some((t) => t.status === "running" && t.ptyId !== null);
+
   useEffect(() => {
     if (pending.length === 0) return;
-    const commands = drain();
-    if (commands.length === 0) return;
 
     let targetTab = tabsRef.current.find((t) => t.id === activeId);
     if (!targetTab || targetTab.status !== "running" || targetTab.ptyId === null) {
@@ -454,17 +454,22 @@ export function TerminalPanel() {
         selectTab(running.id);
         targetTab = running;
       } else {
-        createTerminal();
+        if (tabsRef.current.length === 0) {
+          createTerminal();
+        }
         return;
       }
     }
+
+    const commands = drain();
+    if (commands.length === 0) return;
 
     if (targetTab?.ptyId) {
       for (const cmd of commands) {
         void bridge.terminalWrite(targetTab.ptyId, `${cmd}\r`);
       }
     }
-  }, [pending, drain, activeId, selectTab, createTerminal]);
+  }, [pending, drain, activeId, selectTab, createTerminal, hasRunningPty]);
 
   const currentTab = tabs.find((t) => t.id === activeId);
 
@@ -600,7 +605,7 @@ export function TerminalPanel() {
               )}
 
               {tab.status === "running" && (
-                <span className="size-1.5 shrink-0 rounded-full bg-emerald-400" />
+                <span className="size-1.5 shrink-0 rounded-full bg-status-ok" />
               )}
               {tab.status === "idle" && (
                 <span className="size-1.5 shrink-0 rounded-full bg-fg-faint" />

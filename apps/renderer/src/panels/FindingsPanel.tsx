@@ -157,15 +157,15 @@ function ReportDialog({ findings, onClose }: { findings: Finding[]; onClose: () 
 
 const STATUS_TONE: Record<FindingStatus, string> = {
   open: "text-fg-dim",
-  confirmed: "text-rose-300",
+  confirmed: "text-status-error",
   "false-positive": "text-fg-faint line-through",
-  fixed: "text-emerald-300 line-through",
+  fixed: "text-status-ok line-through",
 };
 
 const SEVERITY_TONE: Record<Severity, string> = {
-  critical: "bg-rose-500/15 text-rose-300 border-rose-500/40",
-  high: "bg-orange-500/15 text-orange-300 border-orange-500/40",
-  medium: "bg-amber-500/15 text-amber-300 border-amber-500/40",
+  critical: "bg-status-error/15 text-status-error border-status-error/40",
+  high: "bg-status-high/15 text-status-high border-status-high/40",
+  medium: "bg-status-warn/15 text-status-warn border-status-warn/40",
   low: "bg-accent/15 text-accent border-accent/40",
   info: "bg-fg/10 text-fg-dim border-line",
 };
@@ -236,7 +236,8 @@ export function FindingsPanel() {
         toast.error(t("Could not initialize AI session."));
         return;
       }
-      const filePart = finding.location ? finding.location.split(":")[0].trim() : "";
+      const rawLoc = (finding.location || "").trim();
+      const filePart = !rawLoc || /^https?:\/\//i.test(rawLoc) ? "" : rawLoc.replace(/:\d+(?::\d+)?$/, "").trim();
       if (filePart && root) {
         const fullPath = filePart.startsWith("/") || filePart.includes(":\\") || filePart.includes(":/")
           ? filePart
@@ -513,7 +514,7 @@ export function FindingsPanel() {
         </div>
       </PanelHeader>
 
-      {copied && <p className="shrink-0 border-b border-line px-3 py-1 text-[11px] text-emerald-300">{t("Report copied.")}</p>}
+      {copied && <p className="shrink-0 border-b border-line px-3 py-1 text-[11px] text-status-ok">{t("Report copied.")}</p>}
       {adding && <AddForm onClose={() => setAdding(false)} />}
       {showReport && <ReportDialog findings={gatherReport()} onClose={() => setShowReport(false)} />}
 
@@ -596,7 +597,7 @@ export function FindingsPanel() {
                         {t("Verify live")}
                       </button>
                     )}
-                    <button type="button" onClick={() => useFindings.getState().remove(finding.id)} className="flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-rose-300">
+                    <button type="button" onClick={() => useFindings.getState().remove(finding.id)} className="flex items-center gap-1 rounded-sm px-1 py-0.5 text-[10px] text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-status-error">
                       <X className="size-3" strokeWidth={1.75} />
                       {t("Remove")}
                     </button>

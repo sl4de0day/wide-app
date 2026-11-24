@@ -96,6 +96,9 @@ export const useFindings = create<FindingsState>((set, get) => ({
       location: finding.location ?? "",
       detail: finding.detail ?? "",
       status: finding.status ?? "open",
+      ...(finding.pocRequest !== undefined ? { pocRequest: finding.pocRequest } : {}),
+      ...(finding.pocResponse !== undefined ? { pocResponse: finding.pocResponse } : {}),
+      ...(finding.remediation !== undefined ? { remediation: finding.remediation } : {}),
       at: finding.at ?? Date.now(),
     };
     set((state) => {
@@ -273,6 +276,9 @@ function fromWideFinding(f: Record<string, unknown>): ImportedFinding {
     location,
     detail: String(f.detail ?? f.message ?? ""),
     status: typeof f.status === "string" && (FINDING_STATUSES as string[]).includes(f.status) ? (f.status as FindingStatus) : "open",
+    ...(typeof f.pocRequest === "string" ? { pocRequest: f.pocRequest } : {}),
+    ...(typeof f.pocResponse === "string" ? { pocResponse: f.pocResponse } : {}),
+    ...(typeof f.remediation === "string" ? { remediation: f.remediation } : {}),
   };
 }
 

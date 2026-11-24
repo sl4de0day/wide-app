@@ -117,6 +117,10 @@ function registerWorkspaceHandlers() {
         if (workspaceWatchTimer) clearTimeout(workspaceWatchTimer);
         workspaceWatchTimer = setTimeout(() => broadcast("fs:changed", { root }), 300);
       });
+      workspaceWatcher.on("error", () => {
+        try { workspaceWatcher?.close(); } catch {}
+        workspaceWatcher = null;
+      });
     } catch {
 
       workspaceWatcher = null;

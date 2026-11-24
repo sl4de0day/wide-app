@@ -33,9 +33,9 @@ import { useWorkspace } from "@/stores/workspace";
 import { cn } from "@/lib/utils";
 
 const ENV_BADGE: Record<DbEnvironment, string> = {
-  dev: "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
-  staging: "border-amber-500/30 bg-amber-500/10 text-amber-400",
-  prod: "border-rose-500/40 bg-rose-500/15 text-rose-400",
+  dev: "border-status-ok/30 bg-status-ok/10 text-status-ok",
+  staging: "border-status-warn/30 bg-status-warn/10 text-status-warn",
+  prod: "border-status-error/40 bg-status-error/15 text-status-error",
 };
 
 const ENGINE_LABEL: Record<DbEngine, string> = {
@@ -52,7 +52,7 @@ const DEFAULT_PORT: Record<DbEngine, number> = {
   redis: 6379,
 };
 
-function DatabaseConnectionModal() {
+export function DatabaseConnectionModal() {
   const t = useT();
   const modalOpen = useDatabase((s) => s.modalOpen);
   const editing = useDatabase((s) => s.editingConnection);
@@ -228,22 +228,22 @@ function DatabaseConnectionModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeModal}>
       <div
-        className="flex max-h-[88vh] w-full max-w-lg flex-col rounded-lg border border-line bg-surface shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-lg flex-col rounded-lg border border-line bg-panel shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
+          <div className="flex items-center gap-2 text-[13px] font-medium text-fg">
             <Database className="h-4 w-4 text-accent" />
             <span>{editing ? t("Edit Database Connection") : t("New Database Connection")}</span>
           </div>
-          <button type="button" onClick={closeModal} className="rounded p-1 text-ink-3 hover:bg-hover hover:text-ink">
+          <button type="button" onClick={closeModal} className="rounded p-1 text-fg-faint hover:bg-hover hover:text-fg">
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto p-4 text-[12px]">
           <div>
-            <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("Engine")}</label>
+            <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("Engine")}</label>
             <div className="grid grid-cols-4 gap-1.5">
               {(["sqlite", "postgres", "mysql", "redis"] as DbEngine[]).map((eng) => (
                 <button
@@ -256,7 +256,7 @@ function DatabaseConnectionModal() {
                   }}
                   className={cn(
                     "rounded border px-2 py-1.5 text-[11px] font-medium transition-colors",
-                    engine === eng ? "border-accent bg-accent/15 text-accent" : "border-line bg-raised text-ink-2 hover:text-ink"
+                    engine === eng ? "border-accent bg-accent/15 text-accent" : "border-line bg-raised text-fg-dim hover:text-fg"
                   )}
                 >
                   {eng === "sqlite" ? "SQLite" : eng === "postgres" ? "PostgreSQL" : eng === "mysql" ? "MySQL" : "Redis"}
@@ -266,29 +266,29 @@ function DatabaseConnectionModal() {
           </div>
 
           <div>
-            <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("Paste Connection URI (optional)")}</label>
+            <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("Paste Connection URI (optional)")}</label>
             <input
               type="text"
               value={connectionString}
               onChange={(e) => parseUriField(e.target.value)}
               placeholder="postgres://user:pass@localhost:5432/app?sslmode=require"
-              className="w-full rounded border border-line bg-input px-2.5 py-1.5 font-mono text-[11px] text-ink outline-none focus:border-accent"
+              className="w-full rounded border border-line bg-input px-2.5 py-1.5 font-mono text-[11px] text-fg outline-none focus:border-accent"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("Connection Name")}</label>
+              <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("Connection Name")}</label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="local-dev"
-                className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+                className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-accent"
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("Environment")}</label>
+              <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("Environment")}</label>
               <select
                 value={environment}
                 onChange={(e) => {
@@ -296,7 +296,7 @@ function DatabaseConnectionModal() {
                   setEnvironment(env);
                   if (env === "prod") setReadOnly(true);
                 }}
-                className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+                className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-accent"
               >
                 <option value="dev">dev</option>
                 <option value="staging">staging</option>
@@ -307,19 +307,19 @@ function DatabaseConnectionModal() {
 
           {engine === "sqlite" ? (
             <div>
-              <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("SQLite File Path")}</label>
+              <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("SQLite File Path")}</label>
               <div className="flex gap-1.5">
                 <input
                   type="text"
                   value={filePath}
                   onChange={(e) => setFilePath(e.target.value)}
                   placeholder="C:\project\dev.db"
-                  className="min-w-0 flex-1 rounded border border-line bg-input px-2.5 py-1.5 font-mono text-[11px] text-ink outline-none focus:border-accent"
+                  className="min-w-0 flex-1 rounded border border-line bg-input px-2.5 py-1.5 font-mono text-[11px] text-fg outline-none focus:border-accent"
                 />
                 <button
                   type="button"
                   onClick={handleBrowseSqlite}
-                  className="shrink-0 rounded border border-line bg-raised px-2.5 py-1 text-[11px] text-ink-2 hover:text-ink"
+                  className="shrink-0 rounded border border-line bg-raised px-2.5 py-1 text-[11px] text-fg-dim hover:text-fg"
                 >
                   {t("Browse")}
                 </button>
@@ -329,28 +329,28 @@ function DatabaseConnectionModal() {
             <>
               <div className="grid grid-cols-3 gap-2">
                 <div className="col-span-2">
-                  <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("Host")}</label>
+                  <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("Host")}</label>
                   <input
                     type="text"
                     value={host}
                     onChange={(e) => setHost(e.target.value)}
-                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-accent"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("Port")}</label>
+                  <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("Port")}</label>
                   <input
                     type="number"
                     value={port}
                     onChange={(e) => setPort(Number(e.target.value))}
-                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-accent"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-ink-2">
+                  <label className="mb-1 block text-[11px] font-medium text-fg-dim">
                     {engine === "redis" ? t("DB Index") : t("Database")}
                   </label>
                   <input
@@ -358,15 +358,15 @@ function DatabaseConnectionModal() {
                     value={database}
                     onChange={(e) => setDatabase(e.target.value)}
                     placeholder={engine === "redis" ? "0" : "postgres"}
-                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-accent"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("TLS Mode")}</label>
+                  <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("TLS Mode")}</label>
                   <select
                     value={tlsMode}
                     onChange={(e) => setTlsMode(e.target.value as DbTlsMode)}
-                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-accent"
                   >
                     <option value="disable">disable</option>
                     <option value="prefer">prefer</option>
@@ -378,28 +378,28 @@ function DatabaseConnectionModal() {
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("Username")}</label>
+                  <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("Username")}</label>
                   <input
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-accent"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-ink-2">{t("Password")}</label>
+                  <label className="mb-1 block text-[11px] font-medium text-fg-dim">{t("Password")}</label>
                   <input
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder={editing?.hasPassword ? "Saved in encrypted vault" : ""}
-                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-accent"
+                    className="w-full rounded border border-line bg-input px-2.5 py-1.5 text-[12px] text-fg outline-none focus:border-accent"
                   />
                 </div>
               </div>
 
               <div className="rounded border border-line bg-raised/60 p-2.5">
-                <label className="flex cursor-pointer items-center gap-2 text-[11px] font-medium text-ink">
+                <label className="flex cursor-pointer items-center gap-2 text-[11px] font-medium text-fg">
                   <input type="checkbox" checked={sshEnabled} onChange={(e) => setSshEnabled(e.target.checked)} />
                   <span>{t("SSH Bastion Tunnel")}</span>
                 </label>
@@ -411,14 +411,14 @@ function DatabaseConnectionModal() {
                         value={sshHost}
                         onChange={(e) => setSshHost(e.target.value)}
                         placeholder="bastion.example.com"
-                        className="col-span-2 rounded border border-line bg-input px-2 py-1 text-[11px] text-ink outline-none"
+                        className="col-span-2 rounded border border-line bg-input px-2 py-1 text-[11px] text-fg outline-none"
                       />
                       <input
                         type="number"
                         value={sshPort}
                         onChange={(e) => setSshPort(Number(e.target.value))}
                         placeholder="22"
-                        className="rounded border border-line bg-input px-2 py-1 text-[11px] text-ink outline-none"
+                        className="rounded border border-line bg-input px-2 py-1 text-[11px] text-fg outline-none"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -427,12 +427,12 @@ function DatabaseConnectionModal() {
                         value={sshUser}
                         onChange={(e) => setSshUser(e.target.value)}
                         placeholder="ssh username"
-                        className="rounded border border-line bg-input px-2 py-1 text-[11px] text-ink outline-none"
+                        className="rounded border border-line bg-input px-2 py-1 text-[11px] text-fg outline-none"
                       />
                       <select
                         value={sshAuth}
                         onChange={(e) => setSshAuth(e.target.value as "agent" | "key")}
-                        className="rounded border border-line bg-input px-2 py-1 text-[11px] text-ink outline-none"
+                        className="rounded border border-line bg-input px-2 py-1 text-[11px] text-fg outline-none"
                       >
                         <option value="agent">SSH Agent</option>
                         <option value="key">Private Key File</option>
@@ -444,7 +444,7 @@ function DatabaseConnectionModal() {
                         value={sshKeyPath}
                         onChange={(e) => setSshKeyPath(e.target.value)}
                         placeholder="~/.ssh/id_ed25519"
-                        className="w-full rounded border border-line bg-input px-2 py-1 font-mono text-[11px] text-ink outline-none"
+                        className="w-full rounded border border-line bg-input px-2 py-1 font-mono text-[11px] text-fg outline-none"
                       />
                     )}
                   </div>
@@ -453,9 +453,9 @@ function DatabaseConnectionModal() {
             </>
           )}
 
-          <label className="flex cursor-pointer items-center gap-2 rounded border border-line bg-raised/50 px-2.5 py-2 text-[11px] text-ink">
+          <label className="flex cursor-pointer items-center gap-2 rounded border border-line bg-raised/50 px-2.5 py-2 text-[11px] text-fg">
             <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} />
-            <Lock className="h-3.5 w-3.5 text-amber-400" />
+            <Lock className="h-3.5 w-3.5 text-status-warn" />
             <span>{t("Read-Only Lock (blocks INSERT / UPDATE / DELETE / DDL)")}</span>
           </label>
 
@@ -463,7 +463,7 @@ function DatabaseConnectionModal() {
             <div
               className={cn(
                 "rounded border px-2.5 py-1.5 text-[11px]",
-                testResult.ok ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                testResult.ok ? "border-status-ok/40 bg-status-ok/10 text-status-ok" : "border-status-error/40 bg-status-error/10 text-status-error"
               )}
             >
               {testResult.msg}
@@ -476,13 +476,13 @@ function DatabaseConnectionModal() {
             type="button"
             disabled={testing}
             onClick={handleTest}
-            className="flex items-center gap-1.5 rounded border border-line bg-raised px-3 py-1.5 text-[11px] font-medium text-ink hover:bg-hover disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded border border-line bg-raised px-3 py-1.5 text-[11px] font-medium text-fg hover:bg-hover disabled:opacity-50"
           >
             <PlugZap className="h-3.5 w-3.5" />
             <span>{testing ? t("Testing...") : t("Test Connection")}</span>
           </button>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={closeModal} className="rounded px-3 py-1.5 text-[11px] text-ink-2 hover:text-ink">
+            <button type="button" onClick={closeModal} className="rounded px-3 py-1.5 text-[11px] text-fg-dim hover:text-fg">
               {t("Cancel")}
             </button>
             <button
@@ -619,15 +619,15 @@ export function DatabasePanel() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-sidebar text-ink select-none">
+    <div className="flex h-full flex-col bg-sidebar text-fg select-none">
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-2">{t("Database")}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-dim">{t("Database")}</span>
         <div className="flex items-center gap-1">
           <button
             type="button"
             title={t("Open SQL Console")}
             onClick={() => useEditor.getState().openDatabase()}
-            className="rounded p-1 text-ink-2 hover:bg-hover hover:text-ink"
+            className="rounded p-1 text-fg-dim hover:bg-hover hover:text-fg"
           >
             <FileCode2 className="h-3.5 w-3.5" />
           </button>
@@ -635,7 +635,7 @@ export function DatabasePanel() {
             type="button"
             title={t("Scan Workspace")}
             onClick={() => void discoverWorkspace(root)}
-            className="rounded p-1 text-ink-2 hover:bg-hover hover:text-ink"
+            className="rounded p-1 text-fg-dim hover:bg-hover hover:text-fg"
           >
             <FolderSearch className="h-3.5 w-3.5" />
           </button>
@@ -646,7 +646,7 @@ export function DatabasePanel() {
               void loadConnections();
               if (activeConnectionId) void connectAndLoadSchema(activeConnectionId);
             }}
-            className="rounded p-1 text-ink-2 hover:bg-hover hover:text-ink"
+            className="rounded p-1 text-fg-dim hover:bg-hover hover:text-fg"
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
@@ -654,7 +654,7 @@ export function DatabasePanel() {
             type="button"
             title={t("New Connection")}
             onClick={() => openModal(null)}
-            className="rounded p-1 text-ink-2 hover:bg-hover hover:text-ink"
+            className="rounded p-1 text-fg-dim hover:bg-hover hover:text-fg"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -664,7 +664,7 @@ export function DatabasePanel() {
       <div className="flex-1 overflow-y-auto px-1.5 py-2 text-[12px]">
         {unaddedDiscovered.length > 0 && (
           <div className="mb-2.5 rounded border border-line bg-raised/60 p-2">
-            <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+            <div className="mb-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
               <span>{t("Workspace Detected")}</span>
               <span>{unaddedDiscovered.length}</span>
             </div>
@@ -675,8 +675,8 @@ export function DatabasePanel() {
                   className="flex items-center justify-between gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-hover"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-ink">{item.label}</div>
-                    <div className="truncate text-[10px] text-ink-3">{item.relativePath}</div>
+                    <div className="truncate font-medium text-fg">{item.label}</div>
+                    <div className="truncate text-[10px] text-fg-faint">{item.relativePath}</div>
                   </div>
                   <button
                     type="button"
@@ -692,13 +692,13 @@ export function DatabasePanel() {
         )}
 
         {connections.length === 0 ? (
-          <div className="px-2 py-6 text-center text-[11px] text-ink-3">
+          <div className="px-2 py-6 text-center text-[11px] text-fg-faint">
             <Database className="mx-auto mb-2 h-6 w-6 opacity-50" />
             <p>{t("No database connections yet.")}</p>
             <button
               type="button"
               onClick={() => openModal(null)}
-              className="mt-2.5 rounded border border-line bg-raised px-3 py-1 text-[11px] text-ink hover:bg-hover"
+              className="mt-2.5 rounded border border-line bg-raised px-3 py-1 text-[11px] text-fg hover:bg-hover"
             >
               {t("Add Connection")}
             </button>
@@ -721,27 +721,27 @@ export function DatabasePanel() {
                     )}
                   >
                     {isExpanded ? (
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-3" />
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
                     ) : (
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-3" />
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-fg-faint" />
                     )}
                     <span
                       className={cn(
                         "h-2 w-2 shrink-0 rounded-full",
-                        conn.connected ? "bg-emerald-400" : "bg-ink-3/40"
+                        conn.connected ? "bg-status-ok" : "bg-fg-faint/40"
                       )}
                     />
-                    <span className="min-w-0 flex-1 truncate font-medium text-ink">{conn.name}</span>
-                    <span className="rounded bg-raised px-1 py-0.5 text-[9px] font-mono text-ink-2">
+                    <span className="min-w-0 flex-1 truncate font-medium text-fg">{conn.name}</span>
+                    <span className="rounded bg-raised px-1 py-0.5 text-[9px] font-mono text-fg-dim">
                       {ENGINE_LABEL[conn.engine]}
                     </span>
                     <span className={cn("rounded border px-1 py-0.5 text-[9px] font-semibold uppercase", ENV_BADGE[conn.environment])}>
                       {conn.environment}
                     </span>
-                    {conn.readOnly && <Lock className="h-3 w-3 shrink-0 text-amber-400" />}
+                    {conn.readOnly && <Lock className="h-3 w-3 shrink-0 text-status-warn" />}
                   </div>
 
-                  <div className="flex items-center justify-end gap-1 px-2 pb-1 text-[10px] text-ink-3">
+                  <div className="flex items-center justify-end gap-1 px-2 pb-1 text-[10px] text-fg-faint">
                     <button
                       type="button"
                       title={t("SQL Console")}
@@ -750,7 +750,7 @@ export function DatabasePanel() {
                         setSubView(conn.engine === "redis" ? "redis" : "console");
                         useEditor.getState().openDatabase();
                       }}
-                      className="rounded p-0.5 hover:bg-hover hover:text-ink"
+                      className="rounded p-0.5 hover:bg-hover hover:text-fg"
                     >
                       <Play className="h-3 w-3" />
                     </button>
@@ -761,7 +761,7 @@ export function DatabasePanel() {
                         useEditor.getState().openDatabase();
                         void runAudit(conn.id);
                       }}
-                      className="rounded p-0.5 hover:bg-hover hover:text-ink"
+                      className="rounded p-0.5 hover:bg-hover hover:text-fg"
                     >
                       <ShieldAlert className="h-3 w-3" />
                     </button>
@@ -770,7 +770,7 @@ export function DatabasePanel() {
                         type="button"
                         title={t("Disconnect")}
                         onClick={() => void disconnectConnection(conn.id)}
-                        className="rounded p-0.5 hover:bg-hover hover:text-ink"
+                        className="rounded p-0.5 hover:bg-hover hover:text-fg"
                       >
                         <Unplug className="h-3 w-3" />
                       </button>
@@ -779,7 +779,7 @@ export function DatabasePanel() {
                         type="button"
                         title={t("Connect")}
                         onClick={() => void connectAndLoadSchema(conn.id)}
-                        className="rounded p-0.5 hover:bg-hover hover:text-ink"
+                        className="rounded p-0.5 hover:bg-hover hover:text-fg"
                       >
                         <Plug className="h-3 w-3" />
                       </button>
@@ -788,7 +788,7 @@ export function DatabasePanel() {
                       type="button"
                       title={t("Edit")}
                       onClick={() => openModal(conn)}
-                      className="rounded p-0.5 hover:bg-hover hover:text-ink"
+                      className="rounded p-0.5 hover:bg-hover hover:text-fg"
                     >
                       <Edit3 className="h-3 w-3" />
                     </button>
@@ -796,7 +796,7 @@ export function DatabasePanel() {
                       type="button"
                       title={t("Delete")}
                       onClick={() => void deleteConnection(conn.id)}
-                      className="rounded p-0.5 hover:bg-hover hover:text-rose-400"
+                      className="rounded p-0.5 hover:bg-hover hover:text-status-error"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -805,13 +805,13 @@ export function DatabasePanel() {
                   {isExpanded && (
                     <div className="ml-4 border-l border-line/70 pl-2 pb-1">
                       {isBusy && !schema && (
-                        <div className="py-1 text-[11px] text-ink-3">{t("Loading schema...")}</div>
+                        <div className="py-1 text-[11px] text-fg-faint">{t("Loading schema...")}</div>
                       )}
 
                       {schema && conn.engine === "redis" && (
                         <div className="space-y-1 py-1 text-[11px]">
-                          <div className="text-ink-2">
-                            Keys: <span className="font-mono text-ink">{schema.dbSize ?? 0}</span>
+                          <div className="text-fg-dim">
+                            Keys: <span className="font-mono text-fg">{schema.dbSize ?? 0}</span>
                           </div>
                           {(schema.keyPrefixes || []).map((kp) => (
                             <button
@@ -823,10 +823,10 @@ export function DatabasePanel() {
                                 useEditor.getState().openDatabase();
                                 void useDatabase.getState().redisScan("0", kp.prefix === "(root)" ? "*" : kp.prefix);
                               }}
-                              className="flex w-full items-center justify-between rounded px-1.5 py-0.5 text-left text-ink-2 hover:bg-hover hover:text-ink"
+                              className="flex w-full items-center justify-between rounded px-1.5 py-0.5 text-left text-fg-dim hover:bg-hover hover:text-fg"
                             >
                               <span className="truncate font-mono">{kp.prefix}</span>
-                              <span className="text-[10px] text-ink-3">{kp.count}</span>
+                              <span className="text-[10px] text-fg-faint">{kp.count}</span>
                             </button>
                           ))}
                         </div>
@@ -850,15 +850,15 @@ export function DatabasePanel() {
                                 >
                                   <div className="flex min-w-0 items-center gap-1.5">
                                     {tblExpanded ? (
-                                      <ChevronDown className="h-3 w-3 shrink-0 text-ink-3" />
+                                      <ChevronDown className="h-3 w-3 shrink-0 text-fg-faint" />
                                     ) : (
-                                      <ChevronRight className="h-3 w-3 shrink-0 text-ink-3" />
+                                      <ChevronRight className="h-3 w-3 shrink-0 text-fg-faint" />
                                     )}
                                     <Table2 className="h-3.5 w-3.5 shrink-0 text-accent" />
-                                    <span className="truncate text-ink">{tbl.name}</span>
+                                    <span className="truncate text-fg">{tbl.name}</span>
                                   </div>
                                   {tbl.rowCount !== undefined && (
-                                    <span className="shrink-0 font-mono text-[10px] text-ink-3">{tbl.rowCount}</span>
+                                    <span className="shrink-0 font-mono text-[10px] text-fg-faint">{tbl.rowCount}</span>
                                   )}
                                 </div>
 
@@ -871,11 +871,11 @@ export function DatabasePanel() {
                                       return (
                                         <div key={col.name} className="flex items-center justify-between gap-1 py-0.5 text-[10px]">
                                           <div className="flex min-w-0 items-center gap-1">
-                                            {col.primaryKey && <KeyRound className="h-2.5 w-2.5 shrink-0 text-amber-400" />}
-                                            {isFk && <Link2 className="h-2.5 w-2.5 shrink-0 text-sky-400" />}
-                                            <span className="truncate text-ink-2">{col.name}</span>
+                                            {col.primaryKey && <KeyRound className="h-2.5 w-2.5 shrink-0 text-status-warn" />}
+                                            {isFk && <Link2 className="h-2.5 w-2.5 shrink-0 text-status-info" />}
+                                            <span className="truncate text-fg-dim">{col.name}</span>
                                           </div>
-                                          <span className="shrink-0 font-mono text-[9px] text-ink-3">{col.dataType}</span>
+                                          <span className="shrink-0 font-mono text-[9px] text-fg-faint">{col.dataType}</span>
                                         </div>
                                       );
                                     })}
@@ -887,7 +887,7 @@ export function DatabasePanel() {
 
                           {schema.views.length > 0 && (
                             <div className="pt-1">
-                              <div className="px-1.5 text-[10px] font-semibold uppercase text-ink-3">{t("Views")}</div>
+                              <div className="px-1.5 text-[10px] font-semibold uppercase text-fg-faint">{t("Views")}</div>
                               {schema.views.map((v) => (
                                 <div
                                   key={`${v.schema}.${v.name}`}
@@ -895,9 +895,9 @@ export function DatabasePanel() {
                                     useEditor.getState().openDatabase();
                                     void openTableGrid(conn.id, v.schema, v.name);
                                   }}
-                                  className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[11px] text-ink-2 hover:bg-hover hover:text-ink"
+                                  className="flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[11px] text-fg-dim hover:bg-hover hover:text-fg"
                                 >
-                                  <Eye className="h-3 w-3 text-ink-3" />
+                                  <Eye className="h-3 w-3 text-fg-faint" />
                                   <span className="truncate">{v.name}</span>
                                 </div>
                               ))}
@@ -905,7 +905,7 @@ export function DatabasePanel() {
                           )}
 
                           {schema.indexes.length > 0 && (
-                            <div className="px-1.5 pt-1 text-[10px] text-ink-3">
+                            <div className="px-1.5 pt-1 text-[10px] text-fg-faint">
                               {t("Indexes")}: {schema.indexes.length} · {t("Triggers")}: {schema.triggers.length}
                             </div>
                           )}
@@ -923,7 +923,7 @@ export function DatabasePanel() {
       {contextMenu && (
         <div
           style={{ left: contextMenu.x, top: contextMenu.y }}
-          className="fixed z-50 min-w-[180px] rounded border border-line bg-surface py-1 text-[11px] shadow-xl"
+          className="fixed z-50 min-w-[180px] rounded border border-line bg-panel py-1 text-[11px] shadow-xl"
         >
           <button
             type="button"
@@ -931,7 +931,7 @@ export function DatabasePanel() {
               useEditor.getState().openDatabase();
               void openTableGrid(contextMenu.conn.id, contextMenu.table.schema, contextMenu.table.name);
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-hover"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-hover"
           >
             <Table2 className="h-3.5 w-3.5" />
             <span>{t("Browse Data Grid")}</span>
@@ -946,7 +946,7 @@ export function DatabasePanel() {
               useEditor.getState().openDatabase();
               void useDatabase.getState().runQuery({ sql: `SELECT * FROM ${q} LIMIT 100;` });
             }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-hover"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-hover"
           >
             <Play className="h-3.5 w-3.5" />
             <span>{t("Select Top 100")}</span>
@@ -954,7 +954,7 @@ export function DatabasePanel() {
           <button
             type="button"
             onClick={() => void handleExportTable(contextMenu.conn, contextMenu.table, "csv")}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-hover"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-hover"
           >
             <Download className="h-3.5 w-3.5" />
             <span>{t("Export CSV")}</span>
@@ -962,7 +962,7 @@ export function DatabasePanel() {
           <button
             type="button"
             onClick={() => void handleExportTable(contextMenu.conn, contextMenu.table, "json")}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-hover"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-hover"
           >
             <Download className="h-3.5 w-3.5" />
             <span>{t("Export JSON")}</span>
@@ -970,7 +970,7 @@ export function DatabasePanel() {
           <button
             type="button"
             onClick={() => void handleExportTable(contextMenu.conn, contextMenu.table, "sql")}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-hover"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-fg hover:bg-hover"
           >
             <Download className="h-3.5 w-3.5" />
             <span>{t("Export SQL Inserts")}</span>
@@ -986,8 +986,6 @@ export function DatabasePanel() {
           </button>
         </div>
       )}
-
-      <DatabaseConnectionModal />
     </div>
   );
 }

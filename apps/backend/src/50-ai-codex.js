@@ -630,11 +630,14 @@ async function codexOpenLoginTerminal(binPath) {
   ];
   for (const [term, args] of terms) {
     try {
+      const probe = node_child_process.spawnSync("which", [term], { stdio: "ignore", timeout: 2000 });
+      if (probe.status !== 0) continue;
       const child = node_child_process.spawn(term, args, {
         detached: true,
         env,
         stdio: "ignore",
       });
+      child.on("error", () => {});
       child.unref();
       return { ok: true, started: true };
     } catch {}
@@ -1274,11 +1277,17 @@ async function codexSpawnWorker({
         }
       }
     }
-    turn.chain = turn.chain.then(async () => {
-      for (const ev of events) {
-        await handleParsedEvent(ev, turn);
-      }
-    });
+    turn.chain = turn.chain
+      .then(async () => {
+        for (const ev of events) {
+          await handleParsedEvent(ev, turn);
+        }
+      })
+      .catch((err) => {
+        if (!turn.settled) {
+          turn.finish({ ok: false, error: String(err?.message || err) });
+        }
+      });
   });
 
   worker.proc.stderr?.on("data", (chunk) => {
@@ -1320,7 +1329,12 @@ async function codexSpawnWorker({
     codexDisposeWorker(worker);
   });
 
-  await worker.rpc.initialize(CODEX_RPC_TIMEOUT_MS);
+  try {
+    await worker.rpc.initialize(CODEX_RPC_TIMEOUT_MS);
+  } catch (err) {
+    codexDisposeWorker(worker);
+    throw err;
+  }
   return worker;
 }
 

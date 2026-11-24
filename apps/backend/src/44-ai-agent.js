@@ -846,13 +846,14 @@ async function aiExecuteSecurityScan(root, filePath, minSeverity = "info") {
   const minWeight = sevWeight[String(minSeverity || "info").toLowerCase()] ?? 1;
 
   try {
+    if (!secScanApi) return "Security scanner is not initialized.";
     let result;
     if (filePath) {
       const resolved = aiResolvePath(root, filePath);
       if (resolved.error) return resolved.error;
-      result = await secScanFile(root, resolved.path, null);
+      result = await secScanApi.secScanFile(root, resolved.path, null);
     } else {
-      result = await secScanProject(root);
+      result = await secScanApi.secScanProject(root);
     }
 
     const allFindings = Array.isArray(result?.findings) ? result.findings : [];
@@ -1070,8 +1071,9 @@ async function aiExecuteDependencyCheck(root, manifest) {
       return `Could not read manifest file: ${resolved.relative}`;
     }
 
-    secProjectOsv = await readSecOsv(root);
-    const findings = auditManifest(resolved.path, content);
+    if (!secScanApi) return "Security scanner is not initialized.";
+    const projectOsv = await secScanApi.readSecOsv(root);
+    const findings = secScanApi.auditManifest(resolved.path, content, projectOsv);
     if (!findings || findings.length === 0) {
       return `Dependency Audit for ${resolved.relative}: Clean! No vulnerable packages or CVEs found.`;
     }
@@ -1094,8 +1096,9 @@ async function aiExecuteDependencyCheck(root, manifest) {
       if (stats.isFile()) {
         scanned.push(name);
         const text = await promises.readFile(p, "utf8");
-        secProjectOsv = await readSecOsv(root);
-        const res = auditManifest(p, text);
+        if (!secScanApi) return "Security scanner is not initialized.";
+        const projectOsv = await secScanApi.readSecOsv(root);
+        const res = secScanApi.auditManifest(p, text, projectOsv);
         if (Array.isArray(res) && res.length > 0) {
           allFindings.push({ file: name, findings: res });
         }
@@ -2150,7 +2153,7 @@ function registerAiAgentHandlers() {
         p.delta = emojiSanitizer.sanitizeChunk(`${channelType}:delta`, p.delta);
         if (!p.delta) return;
       }
-      if (typeof p.content === "string" && p.content) {
+      if (typeof p.content === "string" && p.content && p.type !== "edit" && p.type !== "file_read") {
         p.content = emojiSanitizer.sanitizeChunk(`${channelType}:content`, p.content);
         if (!p.content) return;
       }

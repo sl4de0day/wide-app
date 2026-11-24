@@ -92,8 +92,8 @@ export function ComparerOverlay() {
                   <span
                     key={index}
                     className={cn(
-                      row.type === "add" && "bg-emerald-500/20 text-emerald-300",
-                      row.type === "del" && "bg-rose-500/20 text-rose-300 line-through",
+                      row.type === "add" && "bg-status-ok/20 text-status-ok",
+                      row.type === "del" && "bg-status-error/20 text-status-error line-through",
                     )}
                   >
                     {row.text}
@@ -107,8 +107,8 @@ export function ComparerOverlay() {
                   key={index}
                   className={cn(
                     "flex gap-2 whitespace-pre-wrap break-all px-1",
-                    row.type === "add" && "bg-emerald-500/10 text-emerald-300",
-                    row.type === "del" && "bg-rose-500/10 text-rose-300",
+                    row.type === "add" && "bg-status-ok/10 text-status-ok",
+                    row.type === "del" && "bg-status-error/10 text-status-error",
                     row.type === "same" && "text-fg-dim",
                   )}
                 >

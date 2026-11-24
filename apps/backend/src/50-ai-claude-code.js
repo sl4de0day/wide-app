@@ -391,10 +391,13 @@ async function claudeCodeOpenLoginTerminal(binPath) {
   ];
   for (const [term, args] of terms) {
     try {
+      const probe = node_child_process.spawnSync("which", [term], { stdio: "ignore", timeout: 2000 });
+      if (probe.status !== 0) continue;
       const child = node_child_process.spawn(term, args, {
         detached: true,
         stdio: "ignore",
       });
+      child.on("error", () => {});
       child.unref();
       return { ok: true, started: true };
     } catch {}
@@ -402,7 +405,7 @@ async function claudeCodeOpenLoginTerminal(binPath) {
   return { ok: false, error: "Could not find a desktop terminal emulator. Run `claude auth login` in your terminal." };
 }
 
-function claudeCodeCreateBridge(getTurnCtx) {
+function claudeCodeCreateBridge(getTurnCtx, fallbackCtx) {
   const token = node_crypto.randomBytes(24).toString("hex");
   const sockets = new Set();
 
@@ -414,14 +417,13 @@ function claudeCodeCreateBridge(getTurnCtx) {
       return;
     }
 
-    const ctx = getTurnCtx();
-    if (!ctx) {
-      res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "no_active_turn" }));
-      return;
-    }
-
     if (req.method === "GET" && req.url === "/tools") {
+      const ctx = getTurnCtx() || fallbackCtx;
+      if (!ctx) {
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "no_active_turn" }));
+        return;
+      }
       const specs = __wideTs
         .aiFilterToolsForClaudeMcp(AI_TOOLS, {
           allowWrites: ctx.allowWrites,
@@ -443,6 +445,13 @@ function claudeCodeCreateBridge(getTurnCtx) {
       return;
     }
 
+    const ctx = getTurnCtx();
+    if (!ctx) {
+      res.writeHead(503, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "no_active_turn" }));
+      return;
+    }
+
     if (req.method === "POST" && req.url === "/tool") {
       let body = "";
       req.on("data", (chunk) => {
@@ -452,7 +461,8 @@ function claudeCodeCreateBridge(getTurnCtx) {
         try {
           const parsed = JSON.parse(body || "{}");
           const toolName = String(parsed.name ?? "").trim();
-          const args = parsed.arguments && typeof parsed.arguments === "object" ? parsed.arguments : {};
+          const rawArgs = parsed.arguments ?? parsed.input;
+          const args = rawArgs && typeof rawArgs === "object" ? rawArgs : {};
           const allowedSpecs = __wideTs.aiFilterToolsForClaudeMcp(AI_TOOLS, {
             allowWrites: ctx.allowWrites,
             toolMode: ctx.toolMode,
@@ -745,6 +755,8 @@ function claudeCodeSpawnWorker({
   effort,
   interactionMode,
   toolMode,
+  allowWrites,
+  allowBrowser,
 }) {
   const tempFiles = [];
   const stamp = `${Date.now()}-${node_crypto.randomBytes(6).toString("hex")}`;
@@ -768,51 +780,61 @@ function claudeCodeSpawnWorker({
   };
 
   return (async () => {
-    worker.bridge = await claudeCodeCreateBridge(() => worker.currentTurn);
+    try {
+      const fallbackCtx = {
+        allowWrites: allowWrites !== undefined ? Boolean(allowWrites) : interactionMode !== "ask",
+        toolMode: toolMode || "full",
+        allowBrowser: Boolean(allowBrowser),
+      };
+      worker.bridge = await claudeCodeCreateBridge(() => worker.currentTurn, fallbackCtx);
 
-    const mcpScript = node_path.join(claudeCodeAppRoot(), "sidecar", "ai-mcp.cjs");
-    let mcpConfigPath = "";
-    if (node_fs.existsSync(mcpScript)) {
-      mcpConfigPath = node_path.join(node_os.tmpdir(), `wide-cc-mcp-${stamp}.json`);
-      const mcpConfig = {
-        mcpServers: {
-          wide: {
-            command: process.execPath,
-            args: [mcpScript],
-            env: {
-              WIDE_AI_PORT: String(worker.bridge.port),
-              WIDE_AI_TOKEN: worker.bridge.token,
-              ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+      const mcpScript = node_path.join(claudeCodeAppRoot(), "sidecar", "ai-mcp.cjs");
+      let mcpConfigPath = "";
+      if (node_fs.existsSync(mcpScript)) {
+        mcpConfigPath = node_path.join(node_os.tmpdir(), `wide-cc-mcp-${stamp}.json`);
+        const mcpConfig = {
+          mcpServers: {
+            wide: {
+              command: process.execPath,
+              args: [mcpScript],
+              env: {
+                WIDE_AI_PORT: String(worker.bridge.port),
+                WIDE_AI_TOKEN: worker.bridge.token,
+                ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+              },
             },
           },
-        },
-      };
-      node_fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig), "utf8");
-      tempFiles.push(mcpConfigPath);
+        };
+        node_fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig), "utf8");
+        tempFiles.push(mcpConfigPath);
+      }
+
+      const cliArgs = __wideTs.buildClaudeCliArgs({
+        sessionId: resume ? undefined : claudeSessionId,
+        resumeSessionId: resume ? claudeSessionId : undefined,
+        appendSystemPromptFile: promptFile,
+        mcpConfigPath,
+        model,
+        fallbackModel,
+        effort,
+        mode: interactionMode,
+        toolMode,
+      });
+
+      const spec = claudeCodeBuildSpawnSpec(binPath, cliArgs);
+      const env = claudeCodeSanitizedEnv(spec.asNode ? { ELECTRON_RUN_AS_NODE: "1" } : {});
+
+      worker.proc = node_child_process.spawn(spec.command, spec.args, {
+        cwd: root || process.cwd(),
+        env,
+        windowsHide: true,
+        shell: spec.useShell,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (err) {
+      claudeCodeDisposeWorker(worker);
+      throw err;
     }
-
-    const cliArgs = __wideTs.buildClaudeCliArgs({
-      sessionId: resume ? undefined : claudeSessionId,
-      resumeSessionId: resume ? claudeSessionId : undefined,
-      appendSystemPromptFile: promptFile,
-      mcpConfigPath,
-      model,
-      fallbackModel,
-      effort,
-      mode: interactionMode,
-      toolMode,
-    });
-
-    const spec = claudeCodeBuildSpawnSpec(binPath, cliArgs);
-    const env = claudeCodeSanitizedEnv(spec.asNode ? { ELECTRON_RUN_AS_NODE: "1" } : {});
-
-    worker.proc = node_child_process.spawn(spec.command, spec.args, {
-      cwd: root || process.cwd(),
-      env,
-      windowsHide: true,
-      shell: spec.useShell,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
 
     const handleParsedEvent = async (ev, turn) => {
       if (!turn || turn.settled) return;
@@ -984,11 +1006,17 @@ function claudeCodeSpawnWorker({
           }
         }
       }
-      turn.chain = turn.chain.then(async () => {
-        for (const ev of events) {
-          await handleParsedEvent(ev, turn);
-        }
-      });
+      turn.chain = turn.chain
+        .then(async () => {
+          for (const ev of events) {
+            await handleParsedEvent(ev, turn);
+          }
+        })
+        .catch((err) => {
+          if (!turn.settled) {
+            turn.finish({ ok: false, error: String(err?.message || err) });
+          }
+        });
     };
 
     worker.proc.stdout.on("data", (chunk) => {
@@ -1271,6 +1299,8 @@ async function aiRunClaudeCodeTurn({
     effort: normalizedEffort,
     interactionMode: effectiveInteractionMode,
     toolMode: effectiveToolMode,
+    allowWrites,
+    allowBrowser,
   });
   if (workerKey) {
     CLAUDE_CODE_WORKERS.set(workerKey, worker);
@@ -1312,6 +1342,8 @@ async function aiRunClaudeCodeTurn({
       effort: normalizedEffort,
       interactionMode: effectiveInteractionMode,
       toolMode: effectiveToolMode,
+      allowWrites,
+      allowBrowser,
     });
     if (workerKey) {
       CLAUDE_CODE_WORKERS.set(workerKey, worker);

@@ -18,45 +18,12 @@ let agyCurrentTurnCtx = null;
 let agyCachedModels = null;
 let agyLastSignedIn = null;
 
-async function antigravityPath() {
-  const override = String(process.env.WIDE_AGY_PATH || "").trim();
-  if (override) {
-    try {
-      const st = await promises.stat(override);
-      if (st.isFile()) return override;
-    } catch {}
-  }
-
-  const candidates = [];
-  if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA || node_path.join(node_os.homedir(), "AppData", "Local");
-    candidates.push(
-      node_path.join(localAppData, "agy", "bin", "agy.exe"),
-      node_path.join(node_os.homedir(), ".local", "bin", "agy.exe"),
-      node_path.join(node_os.homedir(), "AppData", "Local", "Programs", "agy", "agy.exe"),
-    );
-  } else {
-    candidates.push(
-      node_path.join(node_os.homedir(), ".local", "bin", "agy"),
-      node_path.join(node_os.homedir(), ".agy", "bin", "agy"),
-      "/usr/local/bin/agy",
-      "/opt/homebrew/bin/agy",
-      "/usr/bin/agy",
-    );
-  }
-
-  for (const candidate of candidates) {
-    try {
-      const st = await promises.stat(candidate);
-      if (st.isFile()) return candidate;
-    } catch {}
-  }
-
+async function antigravityWhere(name) {
   const locator = process.platform === "win32" ? "where.exe" : "which";
   return await new Promise((resolve) => {
     node_child_process.execFile(
       locator,
-      ["agy"],
+      [name],
       { timeout: 4000, windowsHide: true },
       (err, stdout) => {
         if (err || !stdout) return resolve("");
@@ -72,9 +39,65 @@ async function antigravityPath() {
   });
 }
 
+async function antigravityPath() {
+  const override = String(process.env.WIDE_AGY_PATH || "").trim();
+  if (override) {
+    try {
+      const st = await promises.stat(override);
+      if (st.isFile()) return override;
+    } catch {}
+  }
+
+  const home = node_os.homedir();
+  const candidates = [];
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA || node_path.join(home, "AppData", "Local");
+    const appData = process.env.APPDATA || node_path.join(home, "AppData", "Roaming");
+    candidates.push(
+      node_path.join(localAppData, "agy", "bin", "agy.exe"),
+      node_path.join(home, "AppData", "Local", "agy", "bin", "agy.exe"),
+      node_path.join(home, ".agy", "bin", "agy.exe"),
+      node_path.join(home, ".local", "bin", "agy.exe"),
+      node_path.join(home, ".gemini", "bin", "agy.exe"),
+      node_path.join(home, ".gemini", "antigravity", "bin", "agy.exe"),
+      node_path.join(localAppData, "Programs", "agy", "agy.exe"),
+      node_path.join(localAppData, "Programs", "Antigravity", "bin", "agy.exe"),
+      node_path.join(home, "AppData", "Local", "Programs", "agy", "agy.exe"),
+      node_path.join(home, "AppData", "Local", "Programs", "Antigravity", "bin", "agy.exe"),
+      node_path.join(appData, "npm", "agy.cmd"),
+    );
+  } else {
+    candidates.push(
+      node_path.join(home, ".local", "bin", "agy"),
+      node_path.join(home, ".agy", "bin", "agy"),
+      node_path.join(home, ".gemini", "bin", "agy"),
+      "/usr/local/bin/agy",
+      "/opt/homebrew/bin/agy",
+      "/usr/bin/agy",
+    );
+  }
+
+  for (const candidate of new Set(candidates)) {
+    try {
+      const st = await promises.stat(candidate);
+      if (st.isFile()) return candidate;
+    } catch {}
+  }
+
+  const names = process.platform === "win32" ? ["agy", "agy.exe", "agy.cmd"] : ["agy"];
+  for (const name of names) {
+    const found = await antigravityWhere(name);
+    if (found) return found;
+  }
+  return "";
+}
+
 function antigravityBuildSpawnSpec(binPath, args) {
   const env = { ...process.env };
   if (/\.(js|mjs|cjs)$/i.test(binPath)) {
+    if (process.versions?.electron) {
+      env.ELECTRON_RUN_AS_NODE = "1";
+    }
     return { command: process.execPath, args: [binPath, ...args], env };
   }
   if (process.platform === "win32" && /\.(cmd|bat)$/i.test(binPath)) {
@@ -179,7 +202,7 @@ async function antigravityListModels(binPath) {
       error: "Antigravity CLI is not installed.",
     };
   }
-  const res = await antigravityExecCapture(resolvedBin, ["models"], { timeoutMs: 12000 });
+  const res = await antigravityExecCapture(resolvedBin, ["models"], { timeoutMs: AGY_EXEC_TIMEOUT_MS });
   const parsed = __wideTs.parseAntigravityModelsOutput(res.stdout);
   if (res.ok && parsed.length > 0) {
     agyCachedModels = parsed;
@@ -216,6 +239,7 @@ async function antigravityReadStatus(opts = {}) {
   const binPath = await antigravityPath();
   if (!binPath) {
     return {
+      ok: true,
       installed: false,
       signedIn: false,
       version: "",
@@ -228,7 +252,7 @@ async function antigravityReadStatus(opts = {}) {
 
   const [verRes, modelsRes, mcpRes] = await Promise.all([
     antigravityExecCapture(binPath, ["--version"], { timeoutMs: 5000 }),
-    antigravityExecCapture(binPath, ["models"], { timeoutMs: 12000 }),
+    antigravityExecCapture(binPath, ["models"], { timeoutMs: AGY_EXEC_TIMEOUT_MS }),
     antigravityExecCapture(binPath, ["mcp", "list"], { timeoutMs: 8000 }),
   ]);
 
@@ -251,12 +275,13 @@ async function antigravityReadStatus(opts = {}) {
     signedIn = true;
   } else if (!opts.force && agyLastSignedIn !== null) {
     signedIn = agyLastSignedIn;
-  } else if (modelsRes.ok) {
+  } else if (modelsRes.ok || modelsRes.timedOut || errInfo?.kind === "network") {
     signedIn = antigravityHasLocalAuthFile();
   }
   agyLastSignedIn = signedIn;
 
   return {
+    ok: true,
     installed: true,
     signedIn,
     version,
@@ -355,7 +380,11 @@ async function antigravityOpenLoginTerminal(binPath) {
   ];
   for (const [term, tArgs] of terminals) {
     try {
-      node_child_process.spawn(term, tArgs, { detached: true, stdio: "ignore" }).unref();
+      const probe = node_child_process.spawnSync("which", [term], { stdio: "ignore", timeout: 2000 });
+      if (probe.status !== 0) continue;
+      const child = node_child_process.spawn(term, tArgs, { detached: true, stdio: "ignore" });
+      child.on("error", () => {});
+      child.unref();
       return { ok: true, started: true };
     } catch {}
   }
@@ -652,7 +681,13 @@ function antigravityBuildTurnPrompt({
     if (language) meta.push(`User UI Language: ${language}`);
     if (activeFile) meta.push(`Active Editor File: ${activeFile}`);
     if (Array.isArray(openTabs) && openTabs.length > 0) {
-      meta.push(`Open Tabs: ${openTabs.slice(0, 20).join(", ")}`);
+      const formattedTabs = openTabs
+        .slice(0, 20)
+        .map((t) => (typeof t === "string" ? t : (t?.path ? node_path.basename(String(t.path)) : String(t?.name || ""))))
+        .filter(Boolean);
+      if (formattedTabs.length > 0) {
+        meta.push(`Open Tabs: ${formattedTabs.join(", ")}`);
+      }
     }
     sections.push(`[Wide Workspace Context]\n${meta.join("\n")}`);
   }
@@ -707,7 +742,10 @@ function antigravityExtractFilePath(input) {
 function antigravityTakePreEditSnapshot(root, input) {
   const filePath = antigravityExtractFilePath(input);
   if (!filePath || !root) return null;
-  const resolved = aiResolvePath(root, filePath);
+  const resolvedRes = aiResolvePath(root, filePath);
+  const resolved = typeof resolvedRes === "string"
+    ? resolvedRes
+    : (resolvedRes && !resolvedRes.error && typeof resolvedRes.path === "string" ? resolvedRes.path : "");
   if (!resolved) return null;
   const relPath = node_path.relative(root, resolved).replace(/\\/g, "/");
   let beforeContent = "";
@@ -739,7 +777,7 @@ async function antigravityFlushEditSnapshot(root, snap, send) {
   send({
     type: "edit",
     root,
-    path: snap.relPath,
+    path: snap.resolved,
     oldContent: snap.beforeContent,
     content: afterContent,
     existed: snap.existed,
@@ -791,7 +829,7 @@ function aiCloseAntigravitySession(sessionId) {
   const worker = AGY_WORKERS.get(sid);
   if (worker) antigravityDisposeWorker(worker);
   if (typeof setAiSessionAntigravityMeta === "function") {
-    void setAiSessionAntigravityMeta(sid, { conversationId: "" }).catch(() => {});
+    void setAiSessionAntigravityMeta(sid, { antigravityConversationId: "" }).catch(() => {});
   }
   return Boolean(worker);
 }
@@ -866,7 +904,7 @@ function antigravitySpawnWorker({
           worker.conversationId = ev.conversationId;
           turn.conversationId = ev.conversationId;
           if (sessionId && typeof setAiSessionAntigravityMeta === "function") {
-            void setAiSessionAntigravityMeta(sessionId, { conversationId: ev.conversationId }).catch(() => {});
+            void setAiSessionAntigravityMeta(sessionId, { antigravityConversationId: ev.conversationId }).catch(() => {});
           }
         }
         continue;
@@ -933,7 +971,7 @@ function antigravitySpawnWorker({
           worker.conversationId = ev.conversationId;
           turn.conversationId = ev.conversationId;
           if (sessionId && typeof setAiSessionAntigravityMeta === "function") {
-            void setAiSessionAntigravityMeta(sessionId, { conversationId: ev.conversationId }).catch(() => {});
+            void setAiSessionAntigravityMeta(sessionId, { antigravityConversationId: ev.conversationId }).catch(() => {});
           }
         }
         for (const [eid, snap] of Array.from(turn.editSnapshots.entries())) {
@@ -1075,8 +1113,8 @@ function antigravityDispatchTurn(worker, { promptText, images, root, send, signa
 
     const onAbort = () => {
       turn.aborted = true;
-      antigravityDisposeWorker(worker);
       turn.resolve({ ok: true, text: turn.finalText || "", aborted: true });
+      antigravityDisposeWorker(worker);
     };
 
     const cleanup = () => {
@@ -1163,7 +1201,7 @@ async function aiRunAntigravityTurn({
       effectiveSid && typeof getAiSessionAntigravityMeta === "function"
         ? await getAiSessionAntigravityMeta(effectiveSid).catch(() => null)
         : null;
-    let storedConvId = String(meta?.conversationId || "").trim();
+    let storedConvId = String(meta?.antigravityConversationId || meta?.conversationId || "").trim();
 
     const sig = antigravityWorkerSignature({
       root,
@@ -1224,7 +1262,7 @@ async function aiRunAntigravityTurn({
     let outcome = await runAttempt(storedConvId);
     if (!outcome.ok && outcome.errorKind === "session_not_found" && !outcome.emittedAnything && storedConvId) {
       if (effectiveSid && typeof setAiSessionAntigravityMeta === "function") {
-        await setAiSessionAntigravityMeta(effectiveSid, { conversationId: "" }).catch(() => {});
+        await setAiSessionAntigravityMeta(effectiveSid, { antigravityConversationId: "" }).catch(() => {});
       }
       outcome = await runAttempt("");
     }
@@ -1341,30 +1379,49 @@ async function aiCompactAntigravity({ model, messages, signal }) {
 }
 
 function registerAntigravityHandlers() {
+  const checkInstalled = async () => {
+    if (typeof requireInstalled !== "function") return null;
+    return await requireInstalled("ai-assistant");
+  };
+
   electron.ipcMain.handle("ai:antigravityStatus", async (_event, opts = {}) => {
+    const gate = await checkInstalled();
+    if (gate) return gate;
     return await antigravityReadStatus(opts || {});
   });
 
   electron.ipcMain.handle("ai:antigravityModels", async () => {
+    const gate = await checkInstalled();
+    if (gate) return gate;
     const binPath = await antigravityPath();
     return await antigravityListModels(binPath);
   });
 
   electron.ipcMain.handle("ai:antigravityInstall", async () => {
+    const gate = await checkInstalled();
+    if (gate) return gate;
     const res = await antigravityInstall();
     const status = await antigravityReadStatus({ force: true });
     return { ...res, status };
   });
 
   electron.ipcMain.handle("ai:antigravityLogin", async () => {
+    const gate = await checkInstalled();
+    if (gate) return gate;
     const binPath = await antigravityPath();
     if (!binPath) {
       return { ok: false, error: "Antigravity CLI is not installed." };
+    }
+    const status = await antigravityReadStatus({ force: true });
+    if (status.signedIn) {
+      return { ok: true, signedIn: true, alreadySignedIn: true, started: false, ...status };
     }
     return await antigravityOpenLoginTerminal(binPath);
   });
 
   electron.ipcMain.handle("ai:antigravityAttachMcp", async () => {
+    const gate = await checkInstalled();
+    if (gate) return gate;
     const binPath = await antigravityPath();
     if (!binPath) {
       return { ok: false, error: "Antigravity CLI is not installed." };
@@ -1379,6 +1436,8 @@ function registerAntigravityHandlers() {
   });
 
   electron.ipcMain.handle("ai:closeAntigravitySession", async (_event, id) => {
+    const gate = await checkInstalled();
+    if (gate) return gate;
     return { ok: true, closed: aiCloseAntigravitySession(id) };
   });
 }

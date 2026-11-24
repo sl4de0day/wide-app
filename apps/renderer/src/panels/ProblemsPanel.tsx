@@ -279,7 +279,7 @@ export function ProblemsPanel() {
                     title={`${problem.file}:${problem.line}`}
                     className="flex min-w-0 flex-1 items-start gap-2 px-3 py-0.5 text-left text-[11px]"
                   >
-                    {problem.severity === "error" ? <CircleAlert className="mt-0.5 size-3 shrink-0 text-status-error" strokeWidth={1.75} /> : <TriangleAlert className="mt-0.5 size-3 shrink-0 text-amber-400" strokeWidth={1.75} />}
+                    {problem.severity === "error" ? <CircleAlert className="mt-0.5 size-3 shrink-0 text-status-error" strokeWidth={1.75} /> : <TriangleAlert className="mt-0.5 size-3 shrink-0 text-status-warn" strokeWidth={1.75} />}
                     <span className="min-w-0 flex-1">
                       <span className="text-fg">{problem.message.split("\n")[0]}</span>
                       <span className="text-fg-faint"> — {basename(problem.file)}:{problem.line}</span>

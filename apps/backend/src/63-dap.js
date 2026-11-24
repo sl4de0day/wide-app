@@ -95,26 +95,31 @@ function dapHandle(msg) {
     }
     return;
   }
-  if (msg.type === "event") void dapEvent(msg);
+  if (msg.type === "event") {
+    dapEvent(msg).catch((error) => reportRecoverableError("dap", "event handler failed", error));
+  }
 }
 
 async function dapEvent(msg) {
+  if (!dbg) return;
   switch (msg.event) {
     case "initialized":
-
       dbg.initialized = true;
       await dapApplyAllBreakpoints();
+      if (!dbg) return;
       try {
         await dapSend("setExceptionBreakpoints", { filters: dapExceptionFilters() });
       } catch (error) {
         reportRecoverableError("dap", "set exception breakpoints failed", error);
       }
+      if (!dbg) return;
       dapSendQuiet("configurationDone", {});
       break;
     case "stopped": {
       const threadId = (msg.body && msg.body.threadId) || dbg.threadId || 1;
       dbg.threadId = threadId;
       const frames = await dapBuildFrames(threadId);
+      if (!dbg) return;
       dbg.paused = true;
       dapEmit({ type: "paused", reason: (msg.body && msg.body.reason) || "breakpoint", frames });
       break;
@@ -366,6 +371,11 @@ async function dapStartTcp(event, cwd, file, breakpoints, opts) {
   };
 
   child.stderr.on("data", (chunk) => emit({ type: "output", stream: "stderr", text: chunk.toString("utf8") }));
+  child.on("error", (err) => {
+    emit({ type: "output", stream: "stderr", text: String(err?.message || err) });
+    emit({ type: "closed" });
+    if (dbg && dbg.child === child) dbg = null;
+  });
   child.on("close", () => {
     emit({ type: "closed" });
     if (dbg && dbg.child === child) dbg = null;

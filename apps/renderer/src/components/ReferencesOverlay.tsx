@@ -72,5 +72,5 @@ export function ReferencesOverlay() {
 }
 
 function cnDot(write?: boolean): string {
-  return `size-1.5 shrink-0 rounded-full ${write ? "bg-amber-400" : "bg-fg-faint/50"}`;
+  return `size-1.5 shrink-0 rounded-full ${write ? "bg-status-warn" : "bg-fg-faint/50"}`;
 }

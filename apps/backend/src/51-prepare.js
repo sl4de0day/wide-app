@@ -606,6 +606,16 @@ function download(url, target, redirects = 6, track = null) {
           let size = 0;
           let failed = null;
           const file = node_fs.createWriteStream(target);
+          const destroyFile = () => {
+            try { file.destroy(); } catch {}
+          };
+          response.on("error", (error) => {
+            failed = String(error?.message || error);
+            destroyFile();
+            resolve({ ok: false, detail: failed });
+          });
+          request.once("error", destroyFile);
+          request.once("timeout", destroyFile);
           response.on("data", (chunk) => {
             size += chunk.length;
             if (size > MAX_ARCHIVE_BYTES && !failed) {

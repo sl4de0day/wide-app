@@ -75,7 +75,10 @@ function browserDevtoolsUrl(port, activeUrl, targetId, trusted) {
           });
         },
       );
+      let attemptDone = false;
       const retryOrGiveUp = () => {
+        if (attemptDone) return;
+        attemptDone = true;
         if (tries < 12) setTimeout(attempt, 300);
         else resolve(null);
       };
@@ -104,7 +107,7 @@ function registerBrowserHandlers() {
 
   electron.ipcMain.handle("browser:devtools", async (_event, open, activeUrl, tabId) => {
     if (!open) {
-      electron.hostRequest("browser:devtools", { url: "" });
+      Promise.resolve(electron.hostRequest("browser:devtools", { url: "" })).catch(() => {});
       return { ok: true };
     }
     if (!browserRemotePort) return { ok: false, error: "The browser has no debug port yet." };
@@ -114,7 +117,7 @@ function registerBrowserHandlers() {
     const targetId = await browserTargetId(asked || browserLastTab);
     const url = await browserDevtoolsUrl(browserRemotePort, want, targetId, Boolean(asked && targetId));
     if (!url) return { ok: false, error: `Could not reach the browser's DevTools on port ${browserRemotePort}.` };
-    electron.hostRequest("browser:devtools", { url });
+    Promise.resolve(electron.hostRequest("browser:devtools", { url })).catch(() => {});
     return { ok: true, url };
   });
 
@@ -130,7 +133,7 @@ function registerBrowserHandlers() {
     }
 
     if (tab) browserLastTab = tab;
-    electron.hostRequest("browser:navigate", { url: target, tabId: tab });
+    Promise.resolve(electron.hostRequest("browser:navigate", { url: target, tabId: tab })).catch(() => {});
     return { ok: true, url: target };
   });
 

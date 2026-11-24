@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
 import { useSequencer } from "@/stores/sequencer";
 
 const VERDICT_TONE: Record<string, string> = {
-  strong: "text-emerald-400",
-  moderate: "text-amber-400",
+  strong: "text-status-ok",
+  moderate: "text-status-warn",
   weak: "text-status-error",
 };
 
@@ -79,7 +79,7 @@ export function SequencerView() {
               {t("Stop")}
             </button>
           ) : (
-            <button type="button" onClick={() => useSequencer.getState().run(count)} disabled={!seed.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-emerald-300 hover:bg-hover disabled:opacity-40">
+            <button type="button" onClick={() => useSequencer.getState().run(count)} disabled={!seed.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-status-ok hover:bg-hover disabled:opacity-40">
               <Play className="size-3" strokeWidth={2} fill="currentColor" />
               {t("Analyze")}
             </button>

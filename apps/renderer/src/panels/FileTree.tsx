@@ -145,6 +145,7 @@ function DraftRow({ row, top }: { row: VisibleRow; top: number }) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
+          e.stopPropagation();
           if (e.key === "Enter") { e.preventDefault(); void commit(); }
           else if (e.key === "Escape") { e.preventDefault(); cancel(); }
         }}
@@ -264,11 +265,11 @@ const Row = memo(function Row({
           className={cn(
             "ml-auto shrink-0 flex items-center justify-center font-mono text-[9px] font-bold px-1.5 py-0.2 rounded-full leading-none",
             badge.maxSeverity === "critical"
-              ? "bg-red-500/20 text-red-400 border border-red-500/40"
+              ? "bg-status-error/20 text-status-error border border-status-error/40"
               : badge.maxSeverity === "high"
-              ? "bg-orange-500/20 text-orange-400 border border-orange-500/40"
+              ? "bg-status-high/20 text-status-high border border-status-high/40"
               : badge.maxSeverity === "medium"
-              ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+              ? "bg-status-warn/20 text-status-warn border border-status-warn/40"
               : "bg-accent/20 text-accent border border-accent/40",
           )}
         >
@@ -348,8 +349,10 @@ export function FileTree({ onOpenPanel }: { onOpenPanel?: (id: string) => void }
 
     for (const f of findings) {
       if (f.status === "fixed" || f.status === "false-positive") continue;
-      const cleanLoc = (f.location || "").split(":")[0].trim();
-      if (!cleanLoc || cleanLoc.startsWith("http://") || cleanLoc.startsWith("https://")) continue;
+      const rawLoc = (f.location || "").trim();
+      if (!rawLoc || rawLoc.startsWith("http://") || rawLoc.startsWith("https://")) continue;
+      const cleanLoc = rawLoc.replace(/:\d+(?::\d+)?$/, "").trim();
+      if (!cleanLoc) continue;
       recordIssue(cleanLoc, f.severity || "medium");
     }
 
@@ -621,6 +624,10 @@ export function FileTree({ onOpenPanel }: { onOpenPanel?: (id: string) => void }
   const menuDir = menu ? dirFor(menu.entry) : root;
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (draft || target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable) {
+      return;
+    }
     const withEntry = rows.filter((r) => r.entry && !r.draftCreate);
     const at = withEntry.findIndex((r) => r.entry!.path === selected);
 

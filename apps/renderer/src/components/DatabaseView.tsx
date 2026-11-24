@@ -122,13 +122,13 @@ function CellInspectorDrawer({
   };
 
   return (
-    <div className="flex w-80 shrink-0 flex-col border-l border-line bg-surface">
+    <div className="flex w-80 shrink-0 flex-col border-l border-line bg-panel">
       <div className="flex items-center justify-between border-b border-line px-3 py-2">
-        <div className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-ink">
+        <div className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-fg">
           <Braces className="h-3.5 w-3.5 shrink-0 text-accent" />
           <span className="truncate">{cell.column}</span>
         </div>
-        <button type="button" onClick={onClose} className="rounded p-1 text-ink-3 hover:bg-hover hover:text-ink">
+        <button type="button" onClick={onClose} className="rounded p-1 text-fg-faint hover:bg-hover hover:text-fg">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -136,7 +136,7 @@ function CellInspectorDrawer({
         <button
           type="button"
           onClick={() => void handleCopy()}
-          className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-ink hover:bg-hover"
+          className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-fg hover:bg-hover"
         >
           <Copy className="h-3 w-3" />
           <span>{t("Copy")}</span>
@@ -154,9 +154,9 @@ function CellInspectorDrawer({
       </div>
       <div className="flex-1 overflow-auto p-3">
         {cell.value === null ? (
-          <span className="font-mono text-[12px] italic text-ink-3">NULL</span>
+          <span className="font-mono text-[12px] italic text-fg-faint">NULL</span>
         ) : (
-          <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-ink">
+          <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-fg">
             {prettyJson ?? str}
           </pre>
         )}
@@ -271,18 +271,18 @@ function ResultTable({
 }) {
   if (result.columns.length === 0) {
     return (
-      <div className="p-4 text-[12px] text-ink-2">
-        Query executed successfully. Affected rows: <span className="font-mono font-semibold text-ink">{result.affectedRows ?? 0}</span> ({result.durationMs}ms)
+      <div className="p-4 text-[12px] text-fg-dim">
+        Query executed successfully. Affected rows: <span className="font-mono font-semibold text-fg">{result.affectedRows ?? 0}</span> ({result.durationMs}ms)
       </div>
     );
   }
   return (
     <table className="w-full border-collapse text-left font-mono text-[11px]">
-      <thead className="sticky top-0 z-10 bg-surface">
+      <thead className="sticky top-0 z-10 bg-panel">
         <tr>
-          <th className="border-b border-r border-line px-2 py-1.5 text-[10px] font-medium text-ink-3">#</th>
+          <th className="border-b border-r border-line px-2 py-1.5 text-[10px] font-medium text-fg-faint">#</th>
           {result.columns.map((col) => (
-            <th key={col.name} className="border-b border-r border-line px-2.5 py-1.5 font-semibold text-ink">
+            <th key={col.name} className="border-b border-r border-line px-2.5 py-1.5 font-semibold text-fg">
               {col.name}
             </th>
           ))}
@@ -291,7 +291,7 @@ function ResultTable({
       <tbody>
         {result.rows.map((row, rIdx) => (
           <tr key={rIdx} className="hover:bg-hover/60">
-            <td className="border-b border-r border-line px-2 py-1 text-[10px] text-ink-3">{rIdx + 1}</td>
+            <td className="border-b border-r border-line px-2 py-1 text-[10px] text-fg-faint">{rIdx + 1}</td>
             {result.columns.map((col) => {
               const val = row[col.name];
               return (
@@ -300,7 +300,7 @@ function ResultTable({
                   onClick={() => onSelectCell({ column: col.name, value: val })}
                   className={cn(
                     "max-w-[320px] cursor-pointer truncate border-b border-r border-line px-2.5 py-1",
-                    val === null ? "italic text-ink-3" : "text-ink"
+                    val === null ? "italic text-fg-faint" : "text-fg"
                   )}
                 >
                   {formatCellDisplay(val)}
@@ -384,7 +384,7 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-3 py-1.5 text-[11px]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-3 py-1.5 text-[11px]">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -400,7 +400,7 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
             type="button"
             disabled={!activeConn || queryRunning}
             onClick={() => void runQuery({ explain: true })}
-            className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-40"
+            className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-fg-dim hover:bg-hover hover:text-fg disabled:opacity-40"
           >
             <Search className="h-3 w-3" />
             <span>EXPLAIN</span>
@@ -408,7 +408,7 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
           <button
             type="button"
             onClick={handleFormat}
-            className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-ink-2 hover:bg-hover hover:text-ink"
+            className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-fg-dim hover:bg-hover hover:text-fg"
           >
             <Wand2 className="h-3 w-3" />
             <span>{t("Format")}</span>
@@ -417,7 +417,7 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
             <button
               type="button"
               onClick={() => setShowSaveBox((v) => !v)}
-              className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-ink-2 hover:bg-hover hover:text-ink"
+              className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-fg-dim hover:bg-hover hover:text-fg"
             >
               <Save className="h-3 w-3" />
               <span>{t("Save Query")}</span>
@@ -431,21 +431,21 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
               <button
                 type="button"
                 onClick={() => void handleExportResult("csv")}
-                className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-ink-2 hover:text-ink"
+                className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-fg-dim hover:text-fg"
               >
                 CSV
               </button>
               <button
                 type="button"
                 onClick={() => void handleExportResult("json")}
-                className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-ink-2 hover:text-ink"
+                className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-fg-dim hover:text-fg"
               >
                 JSON
               </button>
               <button
                 type="button"
                 onClick={() => void handleExportResult("sql")}
-                className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-ink-2 hover:text-ink"
+                className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-fg-dim hover:text-fg"
               >
                 SQL
               </button>
@@ -456,7 +456,7 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
             onClick={() => setShowSidebar((s) => (s === "saved" ? null : "saved"))}
             className={cn(
               "flex items-center gap-1 rounded border px-2 py-1",
-              showSidebar === "saved" ? "border-accent bg-accent/15 text-accent" : "border-line bg-raised text-ink-2 hover:text-ink"
+              showSidebar === "saved" ? "border-accent bg-accent/15 text-accent" : "border-line bg-raised text-fg-dim hover:text-fg"
             )}
           >
             <FileCode2 className="h-3 w-3" />
@@ -467,7 +467,7 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
             onClick={() => setShowSidebar((s) => (s === "history" ? null : "history"))}
             className={cn(
               "flex items-center gap-1 rounded border px-2 py-1",
-              showSidebar === "history" ? "border-accent bg-accent/15 text-accent" : "border-line bg-raised text-ink-2 hover:text-ink"
+              showSidebar === "history" ? "border-accent bg-accent/15 text-accent" : "border-line bg-raised text-fg-dim hover:text-fg"
             )}
           >
             <History className="h-3 w-3" />
@@ -484,21 +484,21 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
             onChange={(e) => setSaveName(e.target.value)}
             placeholder="users-active-check"
             onKeyDown={(e) => e.key === "Enter" && void handleSave()}
-            className="w-60 rounded border border-line bg-input px-2 py-1 font-mono text-ink outline-none focus:border-accent"
+            className="w-60 rounded border border-line bg-input px-2 py-1 font-mono text-fg outline-none focus:border-accent"
           />
           <button type="button" onClick={() => void handleSave()} className="rounded bg-accent px-2.5 py-1 text-white">
             {t("Save to .wide/queries")}
           </button>
-          <button type="button" onClick={() => setShowSaveBox(false)} className="px-2 py-1 text-ink-3 hover:text-ink">
+          <button type="button" onClick={() => setShowSaveBox(false)} className="px-2 py-1 text-fg-faint hover:text-fg">
             {t("Cancel")}
           </button>
         </div>
       )}
 
       {dangerousPrompt && (
-        <div className="flex items-center justify-between gap-3 border-b border-rose-500/40 bg-rose-500/15 px-3 py-2 text-[12px] text-rose-200">
+        <div className="flex items-center justify-between gap-3 border-b border-status-error/40 bg-status-error/15 px-3 py-2 text-[12px] text-status-error">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 shrink-0 text-rose-400" />
+            <AlertTriangle className="h-4 w-4 shrink-0 text-status-error" />
             <div>
               <span className="font-semibold">{t("Dangerous SQL blocked for safety:")} </span>
               <span>{dangerousPrompt.info.reason}</span>
@@ -508,14 +508,14 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
             <button
               type="button"
               onClick={dismissDangerousPrompt}
-              className="rounded border border-line bg-surface px-2.5 py-1 text-[11px] text-ink hover:bg-hover"
+              className="rounded border border-line bg-panel px-2.5 py-1 text-[11px] text-fg hover:bg-hover"
             >
               {t("Cancel")}
             </button>
             <button
               type="button"
               onClick={() => void runQuery({ sql: dangerousPrompt.sql, allowDangerous: true })}
-              className="rounded bg-rose-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-rose-500"
+              className="rounded border border-status-error/45 bg-status-error/15 px-2.5 py-1 text-[11px] font-semibold text-status-error hover:bg-status-error/25"
             >
               {t("Execute Anyway")}
             </button>
@@ -535,14 +535,14 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
             />
           </div>
 
-          <div className="flex items-center justify-between border-b border-line bg-raised px-3 py-1 text-[11px] text-ink-2">
+          <div className="flex items-center justify-between border-b border-line bg-raised px-3 py-1 text-[11px] text-fg-dim">
             <span>
               {queryResult
                 ? `${queryResult.rowCount} row(s) · ${queryResult.durationMs}ms${queryResult.truncated ? ` (auto-limited to ${queryResult.appliedLimit})` : ""}`
                 : t("Ready")}
             </span>
             {activeConn?.readOnly && (
-              <span className="flex items-center gap-1 text-amber-400">
+              <span className="flex items-center gap-1 text-status-warn">
                 <Lock className="h-3 w-3" />
                 {t("Read-Only Lock Active")}
               </span>
@@ -552,13 +552,13 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
           <div className="flex min-h-0 flex-1">
             <div className="min-w-0 flex-1 overflow-auto bg-canvas">
               {queryError ? (
-                <div className="m-3 rounded border border-rose-500/40 bg-rose-500/10 p-3 font-mono text-[11px] text-rose-300">
+                <div className="m-3 rounded border border-status-error/40 bg-status-error/10 p-3 font-mono text-[11px] text-status-error">
                   {queryError}
                 </div>
               ) : queryResult ? (
                 <ResultTable result={queryResult} onSelectCell={setInspectedCell} />
               ) : (
-                <div className="p-6 text-center text-[12px] text-ink-3">
+                <div className="p-6 text-center text-[12px] text-fg-faint">
                   {t("Write a SQL statement above and press Run or Ctrl+Enter.")}
                 </div>
               )}
@@ -568,8 +568,8 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
         </div>
 
         {showSidebar && (
-          <div className="flex w-64 shrink-0 flex-col border-l border-line bg-surface text-[11px]">
-            <div className="flex items-center justify-between border-b border-line px-3 py-2 font-semibold text-ink-2">
+          <div className="flex w-64 shrink-0 flex-col border-l border-line bg-panel text-[11px]">
+            <div className="flex items-center justify-between border-b border-line px-3 py-2 font-semibold text-fg-dim">
               <span>{showSidebar === "history" ? t("Query History") : t("Saved Queries")}</span>
               <div className="flex items-center gap-1.5">
                 {showSidebar === "history" && history.length > 0 && (
@@ -577,12 +577,12 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
                     type="button"
                     onClick={() => void clearHistory()}
                     title={t("Clear History")}
-                    className="rounded border border-line bg-raised px-1.5 py-0.5 text-[10px] font-normal text-ink-3 hover:text-red-400"
+                    className="rounded border border-line bg-raised px-1.5 py-0.5 text-[10px] font-normal text-fg-faint hover:text-status-error"
                   >
                     {t("Clear")}
                   </button>
                 )}
-                <button type="button" onClick={() => setShowSidebar(null)} className="text-ink-3 hover:text-ink">
+                <button type="button" onClick={() => setShowSidebar(null)} className="text-fg-faint hover:text-fg">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -596,9 +596,9 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
                       onClick={() => setQueryText(item.sql)}
                       className="w-full rounded border border-line/60 bg-raised p-2 text-left hover:border-accent"
                     >
-                      <div className="line-clamp-2 font-mono text-[10px] text-ink">{item.sql}</div>
-                      <div className="mt-1 flex justify-between text-[9px] text-ink-3">
-                        <span className={item.error ? "text-red-400" : ""}>{item.error ? t("Error") : `${item.rowCount} rows`}</span>
+                      <div className="line-clamp-2 font-mono text-[10px] text-fg">{item.sql}</div>
+                      <div className="mt-1 flex justify-between text-[9px] text-fg-faint">
+                        <span className={item.error ? "text-status-error" : ""}>{item.error ? t("Error") : `${item.rowCount} rows`}</span>
                         <span>{item.durationMs}ms</span>
                       </div>
                     </button>
@@ -610,8 +610,8 @@ function SqlConsoleSubView({ activeConn, schema }: { activeConn?: DbConnectionSu
                       onClick={() => setQueryText(q.sql)}
                       className="w-full rounded border border-line/60 bg-raised p-2 text-left hover:border-accent"
                     >
-                      <div className="font-medium text-ink">{q.name}.sql</div>
-                      <div className="mt-0.5 line-clamp-2 font-mono text-[10px] text-ink-3">{q.sql}</div>
+                      <div className="font-medium text-fg">{q.name}.sql</div>
+                      <div className="mt-0.5 line-clamp-2 font-mono text-[10px] text-fg-faint">{q.sql}</div>
                     </button>
                   ))}
             </div>
@@ -690,12 +690,12 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
   };
 
   if (!activeConn) {
-    return <div className="p-6 text-center text-[12px] text-ink-3">{t("Select a connection to browse tables.")}</div>;
+    return <div className="p-6 text-center text-[12px] text-fg-faint">{t("Select a connection to browse tables.")}</div>;
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-3 py-1.5 text-[11px]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-3 py-1.5 text-[11px]">
         <div className="flex items-center gap-2">
           <select
             value={selectedTable ? `${selectedTable.schema}.${selectedTable.table}` : ""}
@@ -707,7 +707,7 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
               const tb = dot >= 0 ? v.slice(dot + 1) : v;
               void openTableGrid(activeConn.id, sc, tb);
             }}
-            className="rounded border border-line bg-input px-2 py-1 text-[11px] text-ink outline-none"
+            className="rounded border border-line bg-input px-2 py-1 text-[11px] text-fg outline-none"
           >
             <option value="">{t("Select Table...")}</option>
             {(schema?.tables || []).map((tb) => (
@@ -718,21 +718,21 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
           </select>
 
           <div className="flex items-center rounded border border-line bg-input px-2">
-            <Search className="h-3 w-3 text-ink-3" />
+            <Search className="h-3 w-3 text-fg-faint" />
             <input
               type="text"
               value={gridFilter}
               onChange={(e) => setGridFilter(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && void refreshGrid()}
               placeholder={t("Quick filter rows...")}
-              className="w-44 bg-transparent px-1.5 py-1 text-[11px] text-ink outline-none"
+              className="w-44 bg-transparent px-1.5 py-1 text-[11px] text-fg outline-none"
             />
           </div>
 
           <button
             type="button"
             onClick={() => void refreshGrid()}
-            className="rounded border border-line bg-raised p-1 text-ink-2 hover:text-ink"
+            className="rounded border border-line bg-raised p-1 text-fg-dim hover:text-fg"
             title={t("Refresh")}
           >
             <RefreshCw className={cn("h-3.5 w-3.5", gridLoading && "animate-spin")} />
@@ -748,7 +748,7 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
                 }
                 stageRowInsert(init);
               }}
-              className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-ink-2 hover:text-ink"
+              className="flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-fg-dim hover:text-fg"
             >
               <Plus className="h-3 w-3" />
               <span>{t("Add Row")}</span>
@@ -758,15 +758,15 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
 
         <div className="flex items-center gap-1.5">
           {!activeConn.readOnly && pkCols.length === 0 && selectedTable && (
-            <span className="text-[10px] text-amber-400">{t("No Primary Key (read-only grid)")}</span>
+            <span className="text-[10px] text-status-warn">{t("No Primary Key (read-only grid)")}</span>
           )}
-          <button type="button" onClick={() => void handleExport("csv")} className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-ink-2 hover:text-ink">
+          <button type="button" onClick={() => void handleExport("csv")} className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-fg-dim hover:text-fg">
             <Download className="mr-1 inline h-3 w-3" />CSV
           </button>
-          <button type="button" onClick={() => void handleExport("json")} className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-ink-2 hover:text-ink">
+          <button type="button" onClick={() => void handleExport("json")} className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-fg-dim hover:text-fg">
             JSON
           </button>
-          <button type="button" onClick={() => void handleExport("sql")} className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-ink-2 hover:text-ink">
+          <button type="button" onClick={() => void handleExport("sql")} className="rounded border border-line bg-raised px-2 py-1 text-[10px] text-fg-dim hover:text-fg">
             SQL
           </button>
 
@@ -775,18 +775,18 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
               type="button"
               disabled={gridPage === 0}
               onClick={() => setGridPage(gridPage - 1)}
-              className="rounded border border-line bg-raised p-1 text-ink-2 hover:text-ink disabled:opacity-40"
+              className="rounded border border-line bg-raised p-1 text-fg-dim hover:text-fg disabled:opacity-40"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
-            <span className="px-1 font-mono text-[10px] text-ink-2">
+            <span className="px-1 font-mono text-[10px] text-fg-dim">
               {t("Page")} {gridPage + 1}
             </span>
             <button
               type="button"
               disabled={!gridResult || gridResult.rows.length < gridPageSize}
               onClick={() => setGridPage(gridPage + 1)}
-              className="rounded border border-line bg-raised p-1 text-ink-2 hover:text-ink disabled:opacity-40"
+              className="rounded border border-line bg-raised p-1 text-fg-dim hover:text-fg disabled:opacity-40"
             >
               <ChevronRight className="h-3.5 w-3.5" />
             </button>
@@ -795,8 +795,8 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
       </div>
 
       {pendingChanges.length > 0 && (
-        <div className="flex items-center justify-between border-b border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[11px]">
-          <div className="flex items-center gap-2 text-amber-300">
+        <div className="flex items-center justify-between border-b border-status-warn/40 bg-status-warn/10 px-3 py-1.5 text-[11px]">
+          <div className="flex items-center gap-2 text-status-warn">
             <span className="font-semibold">{pendingChanges.length} {t("pending transaction change(s)")}</span>
             <button
               type="button"
@@ -810,7 +810,7 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
             <button
               type="button"
               onClick={discardAllChanges}
-              className="rounded border border-line bg-surface px-2.5 py-1 text-ink-2 hover:text-ink"
+              className="rounded border border-line bg-panel px-2.5 py-1 text-fg-dim hover:text-fg"
             >
               {t("Discard")}
             </button>
@@ -818,7 +818,7 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
               type="button"
               disabled={applyingChanges}
               onClick={() => void applyPendingChanges()}
-              className="flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="flex items-center gap-1 rounded bg-accent px-2.5 py-1 font-medium text-fg-bright hover:opacity-90 disabled:opacity-50"
             >
               <Check className="h-3 w-3" />
               <span>{applyingChanges ? t("Committing...") : t("Commit Transaction")}</span>
@@ -828,35 +828,35 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
       )}
 
       {showDiffPreview && sqlPreview.length > 0 && (
-        <div className="max-h-40 overflow-auto border-b border-line bg-canvas p-3 font-mono text-[11px] text-ink">
-          <div className="mb-1 text-[10px] font-semibold uppercase text-ink-3">BEGIN TRANSACTION;</div>
+        <div className="max-h-40 overflow-auto border-b border-line bg-canvas p-3 font-mono text-[11px] text-fg">
+          <div className="mb-1 text-[10px] font-semibold uppercase text-fg-faint">BEGIN TRANSACTION;</div>
           {sqlPreview.map((stmt, i) => (
-            <div key={i} className="text-amber-300">{stmt}</div>
+            <div key={i} className="text-status-warn">{stmt}</div>
           ))}
-          <div className="mt-1 text-[10px] font-semibold uppercase text-ink-3">COMMIT;</div>
+          <div className="mt-1 text-[10px] font-semibold uppercase text-fg-faint">COMMIT;</div>
         </div>
       )}
 
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1 overflow-auto bg-canvas">
           {gridError ? (
-            <div className="m-3 rounded border border-rose-500/40 bg-rose-500/10 p-3 font-mono text-[11px] text-rose-300">
+            <div className="m-3 rounded border border-status-error/40 bg-status-error/10 p-3 font-mono text-[11px] text-status-error">
               {gridError}
             </div>
           ) : !selectedTable || !gridResult ? (
-            <div className="p-6 text-center text-[12px] text-ink-3">
+            <div className="p-6 text-center text-[12px] text-fg-faint">
               {t("Pick a table from the sidebar or dropdown to inspect its data.")}
             </div>
           ) : (
             <table className="w-full border-collapse text-left font-mono text-[11px]">
-              <thead className="sticky top-0 z-10 bg-surface">
+              <thead className="sticky top-0 z-10 bg-panel">
                 <tr>
-                  {canEdit && <th className="w-8 border-b border-r border-line px-2 py-1.5 text-[10px] text-ink-3" />}
+                  {canEdit && <th className="w-8 border-b border-r border-line px-2 py-1.5 text-[10px] text-fg-faint" />}
                   {gridResult.columns.map((col) => (
                     <th
                       key={col.name}
                       onClick={() => toggleGridSort(col.name)}
-                      className="cursor-pointer border-b border-r border-line px-2.5 py-1.5 font-semibold text-ink hover:bg-hover"
+                      className="cursor-pointer border-b border-r border-line px-2.5 py-1.5 font-semibold text-fg hover:bg-hover"
                     >
                       <div className="flex items-center justify-between gap-1">
                         <span>{col.name}</span>
@@ -870,8 +870,8 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
               </thead>
               <tbody>
                 {pendingInserts.map((ins, iIdx) => (
-                  <tr key={`ins-${iIdx}`} className="bg-emerald-500/10">
-                    {canEdit && <td className="border-b border-r border-line px-2 py-1 text-[10px] font-bold text-emerald-400">+</td>}
+                  <tr key={`ins-${iIdx}`} className="bg-status-ok/10">
+                    {canEdit && <td className="border-b border-r border-line px-2 py-1 text-[10px] font-bold text-status-ok">+</td>}
                     {gridResult.columns.map((col) => (
                       <td key={col.name} className="border-b border-r border-line px-1.5 py-0.5">
                         <input
@@ -882,7 +882,7 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
                             useDatabase.setState({ pendingInserts: [...pendingInserts] });
                           }}
                           placeholder="NULL"
-                          className="w-full bg-transparent px-1 py-0.5 font-mono text-[11px] text-ink outline-none focus:bg-input"
+                          className="w-full bg-transparent px-1 py-0.5 font-mono text-[11px] text-fg outline-none focus:bg-input"
                         />
                       </td>
                     ))}
@@ -900,7 +900,7 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
                       key={sig || rIdx}
                       className={cn(
                         "hover:bg-hover/60",
-                        isDeleted && "bg-rose-500/15 line-through opacity-60"
+                        isDeleted && "bg-status-error/15 line-through opacity-60"
                       )}
                     >
                       {canEdit && (
@@ -910,7 +910,7 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
                               type="button"
                               title={t("Stage Row Delete")}
                               onClick={() => stageRowDelete(sig, sigInfo.key)}
-                              className={cn("text-ink-3 hover:text-rose-400", isDeleted && "text-rose-400")}
+                              className={cn("text-fg-faint hover:text-status-error", isDeleted && "text-status-error")}
                             >
                               <Trash2 className="h-3 w-3" />
                             </button>
@@ -932,8 +932,8 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
                             }}
                             className={cn(
                               "max-w-[300px] cursor-pointer truncate border-b border-r border-line px-2.5 py-1",
-                              isUpdated && "bg-amber-500/15 text-amber-300",
-                              val === null && "italic text-ink-3"
+                              isUpdated && "bg-status-warn/15 text-status-warn",
+                              val === null && "italic text-fg-faint"
                             )}
                           >
                             {isEditingThis ? (
@@ -954,7 +954,7 @@ function DataGridSubView({ activeConn, schema }: { activeConn?: DbConnectionSumm
                                     setEditingCell(null);
                                   }
                                 }}
-                                className="w-full rounded bg-input px-1 py-0.5 font-mono text-[11px] text-ink outline-none ring-1 ring-accent"
+                                className="w-full rounded bg-input px-1 py-0.5 font-mono text-[11px] text-fg outline-none ring-1 ring-accent"
                               />
                             ) : (
                               formatCellDisplay(val)
@@ -1046,7 +1046,7 @@ function SchemaDiagramSubView({ activeConn, schema }: { activeConn?: DbConnectio
   }, []);
 
   if (!activeConn || !schema || schema.engine === "redis") {
-    return <div className="p-6 text-center text-[12px] text-ink-3">{t("Load a SQL schema to inspect relationships.")}</div>;
+    return <div className="p-6 text-center text-[12px] text-fg-faint">{t("Load a SQL schema to inspect relationships.")}</div>;
   }
 
   const handleSendAllDdlToAi = async () => {
@@ -1069,15 +1069,15 @@ function SchemaDiagramSubView({ activeConn, schema }: { activeConn?: DbConnectio
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between border-b border-line bg-surface px-3 py-1.5 text-[11px]">
-        <span className="text-ink-2">
+      <div className="flex items-center justify-between border-b border-line bg-panel px-3 py-1.5 text-[11px]">
+        <span className="text-fg-dim">
           {schema.tables.length} {t("Tables")} · {schema.foreignKeys.length} {t("Foreign Keys")} ({t("drag cards to arrange")})
         </span>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => void handleCopyMermaid()}
-            className="flex items-center gap-1 rounded border border-line bg-raised px-2.5 py-1 text-ink-2 hover:text-ink"
+            className="flex items-center gap-1 rounded border border-line bg-raised px-2.5 py-1 text-fg-dim hover:text-fg"
           >
             <Copy className="h-3 w-3" />
             <span>{t("Copy Mermaid")}</span>
@@ -1130,20 +1130,20 @@ function SchemaDiagramSubView({ activeConn, schema }: { activeConn?: DbConnectio
               <div
                 key={`${tbl.schema}.${tbl.name}`}
                 style={{ left: pos.x, top: pos.y }}
-                className="absolute w-60 rounded border border-line bg-surface shadow-lg"
+                className="absolute w-60 rounded border border-line bg-panel shadow-lg"
               >
                 <div
                   onPointerDown={(e) => {
                     dragRef.current = { table: tbl.name, startX: e.clientX, startY: e.clientY, origX: pos.x, origY: pos.y };
                   }}
                   onDoubleClick={() => void openTableGrid(activeConn.id, tbl.schema, tbl.name)}
-                  className="flex cursor-grab items-center justify-between border-b border-line bg-raised px-2.5 py-1.5 text-[11px] font-semibold text-ink active:cursor-grabbing"
+                  className="flex cursor-grab items-center justify-between border-b border-line bg-raised px-2.5 py-1.5 text-[11px] font-semibold text-fg active:cursor-grabbing"
                 >
                   <div className="flex items-center gap-1.5 truncate">
                     <Table2 className="h-3.5 w-3.5 shrink-0 text-accent" />
                     <span className="truncate">{tbl.name}</span>
                   </div>
-                  <span className="text-[10px] font-normal text-ink-3">{tbl.rowCount ?? 0}</span>
+                  <span className="text-[10px] font-normal text-fg-faint">{tbl.rowCount ?? 0}</span>
                 </div>
                 <div className="max-h-44 overflow-y-auto p-1.5 text-[10px]">
                   {tbl.columns.map((col) => {
@@ -1151,11 +1151,11 @@ function SchemaDiagramSubView({ activeConn, schema }: { activeConn?: DbConnectio
                     return (
                       <div key={col.name} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-hover">
                         <div className="flex min-w-0 items-center gap-1">
-                          {col.primaryKey && <KeyRound className="h-2.5 w-2.5 shrink-0 text-amber-400" />}
-                          {isFk && <Link2 className="h-2.5 w-2.5 shrink-0 text-sky-400" />}
-                          <span className="truncate text-ink">{col.name}</span>
+                          {col.primaryKey && <KeyRound className="h-2.5 w-2.5 shrink-0 text-status-warn" />}
+                          {isFk && <Link2 className="h-2.5 w-2.5 shrink-0 text-status-info" />}
+                          <span className="truncate text-fg">{col.name}</span>
                         </div>
-                        <span className="shrink-0 font-mono text-[9px] text-ink-3">{col.dataType}</span>
+                        <span className="shrink-0 font-mono text-[9px] text-fg-faint">{col.dataType}</span>
                       </div>
                     );
                   })}
@@ -1170,11 +1170,11 @@ function SchemaDiagramSubView({ activeConn, schema }: { activeConn?: DbConnectio
 }
 
 const SEV_STYLE: Record<DbAuditFinding["severity"], string> = {
-  critical: "border-rose-500/50 bg-rose-500/15 text-rose-300",
-  high: "border-orange-500/50 bg-orange-500/15 text-orange-300",
-  medium: "border-amber-500/50 bg-amber-500/15 text-amber-300",
-  low: "border-sky-500/40 bg-sky-500/10 text-sky-300",
-  info: "border-line bg-raised text-ink-2",
+  critical: "border-status-error/50 bg-status-error/15 text-status-error",
+  high: "border-status-high/50 bg-status-high/15 text-status-high",
+  medium: "border-status-warn/50 bg-status-warn/15 text-status-warn",
+  low: "border-status-info/40 bg-status-info/10 text-status-info",
+  info: "border-line bg-raised text-fg-dim",
 };
 
 function SecurityAuditSubView({ activeConn }: { activeConn?: DbConnectionSummary }) {
@@ -1195,7 +1195,7 @@ function SecurityAuditSubView({ activeConn }: { activeConn?: DbConnectionSummary
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between border-b border-line bg-surface px-3 py-2 text-[11px]">
+      <div className="flex items-center justify-between border-b border-line bg-panel px-3 py-2 text-[11px]">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -1208,9 +1208,9 @@ function SecurityAuditSubView({ activeConn }: { activeConn?: DbConnectionSummary
           </button>
           {summary && (
             <div className="flex items-center gap-1.5 text-[10px]">
-              <span className="rounded bg-rose-500/15 px-1.5 py-0.5 text-rose-300">Critical: {summary.critical}</span>
-              <span className="rounded bg-orange-500/15 px-1.5 py-0.5 text-orange-300">High: {summary.high}</span>
-              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">Medium: {summary.medium}</span>
+              <span className="rounded bg-status-error/15 px-1.5 py-0.5 text-status-error">Critical: {summary.critical}</span>
+              <span className="rounded bg-status-high/15 px-1.5 py-0.5 text-status-high">High: {summary.high}</span>
+              <span className="rounded bg-status-warn/15 px-1.5 py-0.5 text-status-warn">Medium: {summary.medium}</span>
             </div>
           )}
         </div>
@@ -1228,7 +1228,7 @@ function SecurityAuditSubView({ activeConn }: { activeConn?: DbConnectionSummary
 
       <div className="flex-1 space-y-2 overflow-y-auto p-4">
         {findings.length === 0 ? (
-          <div className="py-10 text-center text-[12px] text-ink-3">
+          <div className="py-10 text-center text-[12px] text-fg-faint">
             {t("Run a security & privacy audit to check PII columns, weak password hashes, TLS settings, and encryption.")}
           </div>
         ) : (
@@ -1268,7 +1268,7 @@ function RedisInspectorSubView({ activeConn }: { activeConn?: DbConnectionSummar
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between border-b border-line bg-surface px-3 py-1.5 text-[11px]">
+      <div className="flex items-center justify-between border-b border-line bg-panel px-3 py-1.5 text-[11px]">
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -1276,7 +1276,7 @@ function RedisInspectorSubView({ activeConn }: { activeConn?: DbConnectionSummar
             onChange={(e) => setPatInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void redisScan("0", patInput)}
             placeholder="*"
-            className="w-48 rounded border border-line bg-input px-2 py-1 font-mono text-ink outline-none"
+            className="w-48 rounded border border-line bg-input px-2 py-1 font-mono text-fg outline-none"
           />
           <button
             type="button"
@@ -1290,14 +1290,14 @@ function RedisInspectorSubView({ activeConn }: { activeConn?: DbConnectionSummar
             <button
               type="button"
               onClick={() => void redisScan(cursor, patInput)}
-              className="rounded border border-line bg-raised px-2 py-1 text-ink-2 hover:text-ink"
+              className="rounded border border-line bg-raised px-2 py-1 text-fg-dim hover:text-fg"
             >
               {t("Next Cursor")} ({cursor})
             </button>
           )}
         </div>
         {activeConn?.readOnly && (
-          <span className="flex items-center gap-1 text-amber-400">
+          <span className="flex items-center gap-1 text-status-warn">
             <Lock className="h-3 w-3" />
             {t("Read-Only Lock Active")}
           </span>
@@ -1307,7 +1307,7 @@ function RedisInspectorSubView({ activeConn }: { activeConn?: DbConnectionSummar
       <div className="flex min-h-0 flex-1">
         <div className="w-1/2 overflow-y-auto border-r border-line bg-canvas p-2 font-mono text-[11px]">
           {items.length === 0 ? (
-            <div className="p-4 text-center text-ink-3">{t("No keys loaded. Click Scan Keys.")}</div>
+            <div className="p-4 text-center text-fg-faint">{t("No keys loaded. Click Scan Keys.")}</div>
           ) : (
             items.map((item) => (
               <div
@@ -1318,8 +1318,8 @@ function RedisInspectorSubView({ activeConn }: { activeConn?: DbConnectionSummar
                   selected?.key === item.key && "bg-selected"
                 )}
               >
-                <span className="truncate text-ink">{item.key}</span>
-                <div className="flex shrink-0 items-center gap-2 text-[10px] text-ink-3">
+                <span className="truncate text-fg">{item.key}</span>
+                <div className="flex shrink-0 items-center gap-2 text-[10px] text-fg-faint">
                   <span className="rounded bg-raised px-1 uppercase">{item.type}</span>
                   <span>TTL: {item.ttl}</span>
                 </div>
@@ -1327,13 +1327,13 @@ function RedisInspectorSubView({ activeConn }: { activeConn?: DbConnectionSummar
             ))
           )}
         </div>
-        <div className="flex min-w-0 flex-1 flex-col bg-surface p-3 text-[12px]">
+        <div className="flex min-w-0 flex-1 flex-col bg-panel p-3 text-[12px]">
           {selected ? (
             <>
               <div className="mb-2 flex items-center justify-between border-b border-line pb-2">
                 <div>
-                  <div className="font-mono font-semibold text-ink">{selected.key}</div>
-                  <div className="text-[10px] text-ink-3">
+                  <div className="font-mono font-semibold text-fg">{selected.key}</div>
+                  <div className="text-[10px] text-fg-faint">
                     {selected.type} · TTL: {selected.ttl}
                   </div>
                 </div>
@@ -1341,21 +1341,21 @@ function RedisInspectorSubView({ activeConn }: { activeConn?: DbConnectionSummar
                   <button
                     type="button"
                     onClick={() => void redisDeleteKey(selected.key)}
-                    className="flex items-center gap-1 rounded border border-rose-500/40 bg-rose-500/15 px-2 py-1 text-[11px] text-rose-300 hover:bg-rose-500/25"
+                    className="flex items-center gap-1 rounded border border-status-error/40 bg-status-error/15 px-2 py-1 text-[11px] text-status-error hover:bg-status-error/25"
                   >
                     <Trash2 className="h-3 w-3" />
                     <span>{t("Delete")}</span>
                   </button>
                 )}
               </div>
-              <pre className="flex-1 overflow-auto rounded border border-line bg-canvas p-3 font-mono text-[11px] text-ink">
+              <pre className="flex-1 overflow-auto rounded border border-line bg-canvas p-3 font-mono text-[11px] text-fg">
                 {typeof selected.value === "string"
                   ? tryPrettyJson(selected.value) ?? selected.value
                   : JSON.stringify(selected.value, null, 2)}
               </pre>
             </>
           ) : (
-            <div className="m-auto text-ink-3">{t("Select a Redis key to inspect its value.")}</div>
+            <div className="m-auto text-fg-faint">{t("Select a Redis key to inspect its value.")}</div>
           )}
         </div>
       </div>
@@ -1401,8 +1401,8 @@ export function DatabaseView() {
   ];
 
   return (
-    <div className="flex h-full w-full flex-col bg-canvas text-ink">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-3 py-2 text-[12px]">
+    <div className="flex h-full w-full flex-col bg-canvas text-fg">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-panel px-3 py-2 text-[12px]">
         <div className="flex items-center gap-2">
           <Database className="h-4 w-4 text-accent" />
           <select
@@ -1410,9 +1410,8 @@ export function DatabaseView() {
             onChange={(e) => {
               const id = e.target.value || null;
               selectConnection(id);
-              if (id && !schemas[id]) void connectAndLoadSchema(id);
             }}
-            className="rounded border border-line bg-input px-2.5 py-1 text-[12px] text-ink outline-none focus:border-accent"
+            className="rounded border border-line bg-input px-2.5 py-1 text-[12px] text-fg outline-none focus:border-accent"
           >
             {connections.length === 0 ? (
               <option value="">{t("No Connections")}</option>
@@ -1426,14 +1425,14 @@ export function DatabaseView() {
           </select>
 
           {activeConn?.readOnly && (
-            <span className="flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+            <span className="flex items-center gap-1 rounded border border-status-warn/40 bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn">
               <Lock className="h-2.5 w-2.5" />
               READ-ONLY
             </span>
           )}
 
           {activeConn?.serverVersion && (
-            <span className="hidden text-[11px] text-ink-3 md:inline">{activeConn.serverVersion}</span>
+            <span className="hidden text-[11px] text-fg-faint md:inline">{activeConn.serverVersion}</span>
           )}
         </div>
 
@@ -1449,7 +1448,7 @@ export function DatabaseView() {
                   onClick={() => setSubView(tab.id)}
                   className={cn(
                     "flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium transition-colors",
-                    subView === tab.id ? "bg-accent/15 text-accent" : "text-ink-2 hover:bg-hover hover:text-ink"
+                    subView === tab.id ? "bg-accent/15 text-accent" : "text-fg-dim hover:bg-hover hover:text-fg"
                   )}
                 >
                   <Icon className="h-3.5 w-3.5" />
@@ -1460,7 +1459,7 @@ export function DatabaseView() {
           <button
             type="button"
             onClick={() => openModal(null)}
-            className="ml-2 flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-[11px] text-ink-2 hover:text-ink"
+            className="ml-2 flex items-center gap-1 rounded border border-line bg-raised px-2 py-1 text-[11px] text-fg-dim hover:text-fg"
           >
             <Plus className="h-3 w-3" />
             <span>{t("New")}</span>

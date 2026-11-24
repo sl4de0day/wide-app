@@ -378,7 +378,7 @@ export function IntruderView() {
 
   const total = jobs.length;
   const statusTone = (status: number) =>
-    status >= 500 || status === 0 ? "text-status-error" : status >= 400 ? "text-amber-400" : status >= 300 ? "text-fg-faint" : "text-emerald-400";
+    status >= 500 || status === 0 ? "text-status-error" : status >= 400 ? "text-status-warn" : status >= 300 ? "text-fg-faint" : "text-status-ok";
   const toggleSort = (col: typeof sortCol) => {
     if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
@@ -675,12 +675,12 @@ export function IntruderView() {
             {t("Stop")}
           </button>
         ) : (
-          <button type="button" onClick={() => void attack()} disabled={!marked || total === 0} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-emerald-300 transition-colors duration-100 hover:bg-hover disabled:opacity-40">
+          <button type="button" onClick={() => void attack()} disabled={!marked || total === 0} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-status-ok transition-colors duration-100 hover:bg-hover disabled:opacity-40">
             <Play className="size-3" strokeWidth={2} fill="currentColor" />
             {t("Attack")}
           </button>
         )}
-        {!marked && <span className="text-[10px] text-amber-400">{t("Mark a payload position with §…§")}</span>}
+        {!marked && <span className="text-[10px] text-status-warn">{t("Mark a payload position with §…§")}</span>}
         <span className="flex-1" />
         <input value={filterText} onChange={(e) => setFilterText(e.target.value)} placeholder={t("Filter results…")} spellCheck={false} className={cn(smallInput, "w-40")} />
         {grepPhrases.length > 0 && (
@@ -748,7 +748,7 @@ export function IntruderView() {
                 )}
                 {grepPhrases.map((_, i) => (
                   <td key={i} className="px-1 py-0.5 text-center">
-                    {row.grepHits[i] ? <Check className="size-3 text-emerald-400 inline shrink-0" strokeWidth={2} /> : <span className="text-fg-faint">·</span>}
+                    {row.grepHits[i] ? <Check className="size-3 text-status-ok inline shrink-0" strokeWidth={2} /> : <span className="text-fg-faint">·</span>}
                   </td>
                 ))}
                 <td className={cn("px-2 py-0.5 font-mono tabular-nums", statusTone(row.status))}>{row.status || "—"}</td>

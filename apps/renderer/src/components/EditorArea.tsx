@@ -283,7 +283,7 @@ function EditorTabs({ onOpenPanel }: { onOpenPanel?: (id: string) => void }) {
                   "p-0.5 rounded transition-opacity",
                   isDirty(tab)
                     ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100 hover:text-status-danger",
+                    : "opacity-0 group-hover:opacity-100 hover:text-status-error",
                 )}
               >
                 {isDirty(tab) ? (
@@ -606,8 +606,11 @@ function EditorBreadcrumbs() {
   if (!tab || tab.kind !== "file") return null;
 
   const path = tab.path;
-  const relative = root ? normalisePath(path).slice(normalisePath(root).length + 1) : normalisePath(path);
-  const parts = [rootName || "root", ...relative.split("/")].filter(Boolean);
+  const normPath = normalisePath(path);
+  const normRoot = root ? normalisePath(root).replace(/\/+$/, "") : "";
+  const isInside = Boolean(normRoot && (normPath === normRoot || normPath.startsWith(`${normRoot}/`)));
+  const relative = isInside ? normPath.slice(normRoot.length + 1) : normPath;
+  const parts = isInside ? [rootName || "root", ...relative.split("/")].filter(Boolean) : relative.split("/").filter(Boolean);
 
   return (
     <div
@@ -702,7 +705,7 @@ function PaneContainer({ paneId, isOnlyPane }: { paneId: string; isOnlyPane: boo
             <span className="min-w-0 truncate text-[11px]">
               {tab ? (tab.kind === "file" ? tab.name : t(tab.name)) : t("Empty")}
             </span>
-            {isDirty(tab) && <span className="shrink-0 text-[14px] leading-none text-status-warning">•</span>}
+            {isDirty(tab) && <span className="shrink-0 text-[14px] leading-none text-status-warn">•</span>}
             <PaneFileSwitcher paneId={paneId} currentPath={tab?.path ?? null} />
           </div>
 

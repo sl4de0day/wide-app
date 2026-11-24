@@ -676,7 +676,12 @@ function reconStartCrawl(rawConfig = {}, onEvent) {
       proc = node_child_process.spawn(bin, [], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
       state.proc = proc;
     } catch {
-      void reconRunNodeCrawl(crawlId, cfg, state, emit).then(finish).then(resolve);
+      void reconRunNodeCrawl(crawlId, cfg, state, emit)
+        .then(finish, (err) => {
+          finish(null);
+          return { ok: false, crawlId, error: String(err?.message || err) };
+        })
+        .then(resolve);
       return;
     }
     const errChunks = [];
@@ -696,7 +701,12 @@ function reconStartCrawl(rawConfig = {}, onEvent) {
     });
     proc.stderr.on("data", (d) => errChunks.push(d));
     proc.on("error", () => {
-      void reconRunNodeCrawl(crawlId, cfg, state, emit).then(finish).then(resolve);
+      void reconRunNodeCrawl(crawlId, cfg, state, emit)
+        .then(finish, (err) => {
+          finish(null);
+          return { ok: false, crawlId, error: String(err?.message || err) };
+        })
+        .then(resolve);
     });
     proc.on("close", (code) => {
       finish(null);

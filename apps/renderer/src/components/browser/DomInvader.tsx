@@ -138,7 +138,7 @@ export function DomInvaderPanel({ tabId }: { tabId: string }) {
     <div className="flex h-full min-h-0 flex-col bg-panel">
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
         <span className="text-[11px] uppercase tracking-wide text-fg-faint">{t("DOM Invader")}</span>
-        <span className={armed ? "text-[10px] text-emerald-400" : "text-[10px] text-fg-faint"}>{armed ? t("hooks armed") : ""}</span>
+        <span className={armed ? "text-[10px] text-status-ok" : "text-[10px] text-fg-faint"}>{armed ? t("hooks armed") : ""}</span>
         <span className="flex-1" />
         <span className="text-[10px] tabular-nums text-fg-faint">{flows.length}</span>
       </div>
@@ -159,7 +159,7 @@ export function DomInvaderPanel({ tabId }: { tabId: string }) {
             <tbody>
               {flows.map((f, i) => (
                 <tr key={i} className="border-b border-line/60 align-top">
-                  <td className="px-2 py-0.5 font-mono text-amber-300">{f.sink}</td>
+                  <td className="px-2 py-0.5 font-mono text-status-warn">{f.sink}</td>
                   <td className="max-w-28 truncate px-2 py-0.5 font-mono text-syn-string" title={f.source}>{f.source}</td>
                   <td className="max-w-0 truncate px-2 py-0.5 font-mono text-fg-dim" title={f.value}>{f.value}</td>
                 </tr>

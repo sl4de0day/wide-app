@@ -224,17 +224,22 @@ async function connectToDiscord() {
   sendDiscordHandshake();
 }
 
+let discordShuttingDown = false;
+
 function scheduleDiscordReconnect() {
-  if (discordReconnectTimer) return;
+  if (discordShuttingDown || discordReconnectTimer) return;
   discordReconnectTimer = setTimeout(async () => {
     discordReconnectTimer = null;
+    if (discordShuttingDown) return;
     if (await extensionInstalled("discord-presence")) {
       connectToDiscord();
     }
   }, DISCORD_RECONNECT_INTERVAL_MS);
+  if (typeof discordReconnectTimer.unref === "function") discordReconnectTimer.unref();
 }
 
 function discordRpcShutdown() {
+  discordShuttingDown = true;
   if (discordReconnectTimer) {
     clearTimeout(discordReconnectTimer);
     discordReconnectTimer = null;

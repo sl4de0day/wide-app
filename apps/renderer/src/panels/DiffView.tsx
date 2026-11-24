@@ -85,8 +85,8 @@ export function DiffView({ relPath, staged }: { relPath: string; staged: boolean
                 <tr
                   key={i}
                   className={cn(
-                    row.kind === "add" && "bg-emerald-500/10",
-                    row.kind === "del" && "bg-rose-500/10",
+                    row.kind === "add" && "bg-status-ok/10",
+                    row.kind === "del" && "bg-status-error/10",
                     row.kind === "hunk" && "bg-panel",
                     row.kind === "meta" && "bg-panel/50",
                   )}
@@ -103,8 +103,8 @@ export function DiffView({ relPath, staged }: { relPath: string; staged: boolean
                   <td
                     className={cn(
                       "whitespace-pre-wrap break-all px-2",
-                      row.kind === "add" && "text-emerald-300",
-                      row.kind === "del" && "text-rose-300",
+                      row.kind === "add" && "text-status-ok",
+                      row.kind === "del" && "text-status-error",
                       row.kind === "hunk" && "text-accent",
                       row.kind === "meta" && "text-fg-faint",
                       row.kind === "ctx" && "text-fg-dim",

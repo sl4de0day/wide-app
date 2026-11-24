@@ -86,6 +86,10 @@ function SessionRow({
               root: session.root,
               rootName: basename(session.root),
               folders: [{ path: session.root, name: basename(session.root) }],
+              workflowPath: null,
+              workflowName: "",
+              children: {},
+              expanded: new Set(),
             });
             void bridge.openRecentProject(session.root);
           }
@@ -172,6 +176,10 @@ function SessionRow({
                       root: session.root,
                       rootName: basename(session.root),
                       folders: [{ path: session.root, name: basename(session.root) }],
+                      workflowPath: null,
+                      workflowName: "",
+                      children: {},
+                      expanded: new Set(),
                     });
                     void bridge.openRecentProject(session.root);
                   }

@@ -231,6 +231,14 @@ function sendRequestH2(request, options = {}) {
       });
       try { client.close(); } catch { void 0; }
     });
+    stream.on("error", (error) => {
+      done({ ok: false, error: String((error && error.message) || error) });
+      try { client.close(); } catch { void 0; }
+    });
+    stream.on("close", () => {
+      done({ ok: false, error: "HTTP/2 stream closed before response completed." });
+      try { client.close(); } catch { void 0; }
+    });
     stream.setTimeout(30000, () => {
       stream.close();
       done({ ok: false, error: "Timed out." });
@@ -387,7 +395,7 @@ async function loadOrMakeCa() {
       pem: certPem,
     };
     const isLegacy = electron.safeStorage.isLegacyEncrypted;
-    const stale = secretsNeedReseal();
+    const stale = typeof electron.safeStorage.isStaleSeal === "function" && electron.safeStorage.isStaleSeal();
     if (stale || (typeof isLegacy === "function" && isLegacy.call(electron.safeStorage, keyBlob))) {
       try {
         await writeFileAtomic(PROXY_CA_KEY(), electron.safeStorage.encryptString(keyPem));
@@ -401,6 +409,13 @@ async function loadOrMakeCa() {
   }
 
   if (unreadable) {
+    const preserveUnreadable = async (file) => {
+      try {
+        await promises.rename(file, `${file}.corrupt-${Date.now()}`);
+      } catch {
+        void 0;
+      }
+    };
     await preserveUnreadable(PROXY_CA_KEY());
     await preserveUnreadable(PROXY_CA_CERT());
   }
@@ -1075,6 +1090,8 @@ function relayWebSocket(scheme, req, clientSocket, head) {
     scheme === "https"
       ? { host, port, servername: host, ALPNProtocols: ["http/1.1"] }
       : { host, port };
+  let serverHeadersDone = false;
+  let serverHeaderBuf = Buffer.alloc(0);
   const upstream = connect(options, () => {
     upstream.write(handshake);
     if (head && head.length) {
@@ -1087,7 +1104,23 @@ function relayWebSocket(scheme, req, clientSocket, head) {
     });
     upstream.on("data", (chunk) => {
       clientSocket.write(chunk);
-      fromServer(chunk);
+      if (serverHeadersDone) {
+        fromServer(chunk);
+        return;
+      }
+      serverHeaderBuf = Buffer.concat([serverHeaderBuf, chunk]);
+      const headerEnd = serverHeaderBuf.indexOf("\r\n\r\n");
+      if (headerEnd >= 0) {
+        serverHeadersDone = true;
+        const remainder = serverHeaderBuf.subarray(headerEnd + 4);
+        serverHeaderBuf = Buffer.alloc(0);
+        if (remainder.length > 0) fromServer(remainder);
+      } else if (serverHeaderBuf.length > 65536) {
+        serverHeadersDone = true;
+        const remainder = serverHeaderBuf;
+        serverHeaderBuf = Buffer.alloc(0);
+        fromServer(remainder);
+      }
     });
   });
 
@@ -1356,6 +1389,15 @@ function stopProxy() {
     try { server.close(); } catch {  }
   }
   mitmServers.clear();
+  for (const live of liveWebSockets.values()) {
+    try { live.clientSocket?.destroy(); } catch {  }
+    try { live.upstream?.destroy(); } catch {  }
+  }
+  liveWebSockets.clear();
+  if (trafficTimer) {
+    clearTimeout(trafficTimer);
+    trafficTimer = null;
+  }
   if (proxyServer) {
     try { proxyServer.close(); } catch {  }
   }
@@ -1401,7 +1443,7 @@ function registerProxyHandlers() {
     await loadOrMakeCa();
     const listening = await startProxy();
 
-    electron.hostRequest("browser:proxy", { port: proxyPort });
+    Promise.resolve(electron.hostRequest("browser:proxy", { port: proxyPort })).catch(() => {});
     return { ok: true, port: listening.port, scope: proxyScope };
   });
 
@@ -1409,7 +1451,7 @@ function registerProxyHandlers() {
     const gate = await requireInstalled("proxy");
     if (gate) return gate;
     stopProxy();
-    electron.hostRequest("browser:proxy", { port: 0 });
+    Promise.resolve(electron.hostRequest("browser:proxy", { port: 0 })).catch(() => {});
     return { ok: true };
   });
 

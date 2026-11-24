@@ -518,6 +518,12 @@ async function aiExecuteTerminalSession(root, input = {}, send) {
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
+      child.stdin.on("error", () => {});
+      child.on("error", (err) => {
+        appendOutput(`\n[spawn error] ${String(err?.message || err)}\n`);
+        entry.exited = true;
+        entry.exitCode = -1;
+      });
       child.stdout.on("data", (d) => appendOutput(d.toString("utf8")));
       child.stderr.on("data", (d) => appendOutput(d.toString("utf8")));
       child.on("close", (code) => {

@@ -26,12 +26,12 @@ import { useWorkspace } from "@/stores/workspace";
 import { sendPromptToChat } from "@/lib/sendToChat";
 
 const LETTER_COLOUR: Record<string, string> = {
-  M: "text-amber-400",
-  A: "text-emerald-400",
-  D: "text-rose-400",
-  R: "text-sky-400",
-  C: "text-sky-400",
-  U: "text-rose-400",
+  M: "text-status-warn",
+  A: "text-status-ok",
+  D: "text-status-error",
+  R: "text-status-info",
+  C: "text-status-info",
+  U: "text-status-error",
   "?": "text-fg-faint",
 };
 
@@ -218,7 +218,7 @@ export function CodebergPanel({ builtin, providerId }: { builtin?: boolean; prov
       onClick={() => act().dismiss()}
       className={cn(
         "wide-enter-fade shrink-0 border-b border-line px-2 py-1.5 text-left text-[11px] leading-snug",
-        error ? "text-rose-300" : "text-emerald-300",
+        error ? "text-status-error" : "text-status-ok",
       )}
     >
       {t((error ?? notice)!.key, (error ?? notice)!.params)}
@@ -581,8 +581,8 @@ export function CodebergPanel({ builtin, providerId }: { builtin?: boolean; prov
               className={cn(
                 "flex items-center justify-center gap-1 rounded-sm border px-2 py-1 text-[11px] transition-colors duration-100",
                 confirmDiscard
-                  ? "border-rose-500/60 bg-rose-500/15 text-rose-300"
-                  : "border-line text-fg-faint hover:bg-hover hover:text-rose-300",
+                  ? "border-status-error/60 bg-status-error/15 text-status-error"
+                  : "border-line text-fg-faint hover:bg-hover hover:text-status-error",
               )}
             >
               <RotateCcw className="size-3" strokeWidth={1.75} />

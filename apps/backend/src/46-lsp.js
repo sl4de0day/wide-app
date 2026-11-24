@@ -103,26 +103,37 @@ function lspGetCachedDiagnostics(filePath) {
   return lspDiagnosticsCache.get(node_path.resolve(String(filePath || ""))) || [];
 }
 
-function lspFileUri(filePath) {
-  const posix = filePath.split("\\").join("/").replace(/^\/+/, "");
+function lspDocKey(filePath) {
+  const resolved = node_path.resolve(String(filePath ?? ""));
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
 
-  const encoded = posix
-    .split("/")
-    .map((part) => encodeURIComponent(part).replace(/%3A/gi, ":"))
-    .join("/");
-  return "file:///" + encoded;
+function lspFileUri(filePath) {
+  try {
+    return node_url.pathToFileURL(node_path.resolve(String(filePath ?? ""))).href;
+  } catch {
+    const posix = String(filePath ?? "").split("\\").join("/").replace(/^\/+/, "");
+    const encoded = posix
+      .split("/")
+      .map((part) => encodeURIComponent(part).replace(/%3A/gi, ":"))
+      .join("/");
+    return "file:///" + encoded;
+  }
 }
 
 function lspPathFromUri(uri) {
-  const withoutScheme = String(uri ?? "").replace(/^file:\/\/\/?/, "");
-  let decoded;
   try {
-    decoded = decodeURIComponent(withoutScheme);
+    return node_url.fileURLToPath(String(uri ?? ""));
   } catch {
-
-    decoded = withoutScheme;
+    const withoutScheme = String(uri ?? "").replace(/^file:\/\/\/?/, "");
+    let decoded;
+    try {
+      decoded = decodeURIComponent(withoutScheme);
+    } catch {
+      decoded = withoutScheme;
+    }
+    return process.platform === "win32" ? decoded.split("/").join("\\") : decoded;
   }
-  return decoded.split("/").join("\\");
 }
 
 function lspEmit(channel, payload) {
@@ -161,6 +172,7 @@ function createLspConnection(spec, candidate, root, env) {
   } catch (error) {
     return { ok: false, reason: "spawn-failed", detail: error.message };
   }
+  child.stdin?.on("error", () => {});
 
   const connection = {
     spec,
@@ -236,9 +248,12 @@ function createLspConnection(spec, candidate, root, env) {
 }
 
 function lspWrite(connection, message) {
+  if (!connection?.child?.stdin?.writable) return;
   const body = Buffer.from(JSON.stringify(message), "utf8");
-  connection.child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
-  connection.child.stdin.write(body);
+  try {
+    connection.child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
+    connection.child.stdin.write(body);
+  } catch {}
 }
 
 function lspRequest(connection, method, params, timeoutMs = LSP_REQUEST_TIMEOUT_MS) {
@@ -290,8 +305,11 @@ function handleLspNotification(connection, message) {
   if (message.method === "textDocument/publishDiagnostics") {
     const uri = message.params?.uri ?? "";
     const filePath = lspPathFromUri(uri);
-    const text = connection.text.get(filePath);
+    const docKey = lspDocKey(filePath);
+    const text = connection.text.get(docKey) ?? connection.text.get(filePath);
     if (text === undefined) return;
+    const doc = lspDocuments.get(docKey);
+    const displayPath = doc?.originalPath || filePath;
     const starts = lspLineStarts(text);
     const diagnostics = (message.params?.diagnostics ?? []).map((item) => {
       const from = lspOffsetAt(starts, item.range?.start);
@@ -311,8 +329,8 @@ function handleLspNotification(connection, message) {
         message: item.source ? `${item.message} (${item.source})` : item.message,
       };
     });
-    lspDiagnosticsCache.set(node_path.resolve(filePath), diagnostics);
-    lspEmit("lsp:diagnostics", { path: filePath, diagnostics, server: connection.spec.id });
+    lspDiagnosticsCache.set(node_path.resolve(displayPath), diagnostics);
+    lspEmit("lsp:diagnostics", { path: displayPath, diagnostics, server: connection.spec.id });
   }
 }
 
@@ -500,8 +518,9 @@ function registerLspHandlers() {
     if (!entry?.connection) return { ok: false, reason: "start-failed" };
     const connection = entry.connection;
 
-    connection.text.set(filePath, text);
-    lspDocuments.set(filePath, { root, serverId: spec.id, version: 1 });
+    const docKey = lspDocKey(filePath);
+    connection.text.set(docKey, text);
+    lspDocuments.set(docKey, { root, serverId: spec.id, version: 1, originalPath: filePath });
     lspNotify(connection, "textDocument/didOpen", {
       textDocument: {
         uri: lspFileUri(filePath),
@@ -514,12 +533,13 @@ function registerLspHandlers() {
   });
 
   electron.ipcMain.handle("lsp:change", (_event, filePath, text) => {
-    const doc = lspDocuments.get(filePath);
+    const docKey = lspDocKey(filePath);
+    const doc = lspDocuments.get(docKey);
     if (!doc) return { ok: false, reason: "not-open" };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection) return { ok: false, reason: "no-server" };
     doc.version += 1;
-    entry.connection.text.set(filePath, text);
+    entry.connection.text.set(docKey, text);
     lspNotify(entry.connection, "textDocument/didChange", {
       textDocument: { uri: lspFileUri(filePath), version: doc.version },
       contentChanges: [{ text }],
@@ -528,12 +548,13 @@ function registerLspHandlers() {
   });
 
   electron.ipcMain.handle("lsp:close", (_event, filePath) => {
-    const doc = lspDocuments.get(filePath);
+    const docKey = lspDocKey(filePath);
+    const doc = lspDocuments.get(docKey);
     if (!doc) return { ok: true };
-    lspDocuments.delete(filePath);
+    lspDocuments.delete(docKey);
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (entry?.connection) {
-      entry.connection.text.delete(filePath);
+      entry.connection.text.delete(docKey);
       lspNotify(entry.connection, "textDocument/didClose", {
         textDocument: { uri: lspFileUri(filePath) },
       });
@@ -542,7 +563,7 @@ function registerLspHandlers() {
   });
 
   electron.ipcMain.handle("lsp:completion", async (_event, filePath, line, character) => {
-    const doc = lspDocuments.get(filePath);
+    const doc = lspDocuments.get(lspDocKey(filePath));
     if (!doc) return { items: [] };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return { items: [] };
@@ -566,7 +587,7 @@ function registerLspHandlers() {
   });
 
   electron.ipcMain.handle("lsp:hover", async (_event, filePath, line, character) => {
-    const doc = lspDocuments.get(filePath);
+    const doc = lspDocuments.get(lspDocKey(filePath));
     if (!doc) return null;
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return null;
@@ -600,9 +621,10 @@ function registerLspHandlers() {
     const readText = async (file) => {
       if (textByFile.has(file)) return textByFile.get(file);
 
-      const doc = lspDocuments.get(file);
+      const fk = lspDocKey(file);
+      const doc = lspDocuments.get(fk);
       const server = doc && lspServers.get(lspKey(doc.root, doc.serverId));
-      let text = server?.connection?.text?.get(file);
+      let text = server?.connection?.text?.get(fk);
       if (text === undefined) {
         try {
           text = await promises.readFile(file, "utf8");
@@ -628,7 +650,7 @@ function registerLspHandlers() {
   };
 
   const lspNavRequest = async (filePath, line, character, method) => {
-    const doc = lspDocuments.get(filePath);
+    const doc = lspDocuments.get(lspDocKey(filePath));
     if (!doc) return { locations: [] };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return { locations: [] };
@@ -652,7 +674,7 @@ function registerLspHandlers() {
     lspNavRequest(filePath, line, character, "textDocument/references"));
 
   electron.ipcMain.handle("lsp:signatureHelp", async (_event, filePath, line, character) => {
-    const doc = lspDocuments.get(filePath);
+    const doc = lspDocuments.get(lspDocKey(filePath));
     if (!doc) return { signatures: null };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return { signatures: null };
@@ -685,12 +707,13 @@ function registerLspHandlers() {
   });
 
   electron.ipcMain.handle("lsp:documentHighlight", async (_event, filePath, line, character) => {
-    const doc = lspDocuments.get(filePath);
+    const docKey = lspDocKey(filePath);
+    const doc = lspDocuments.get(docKey);
     if (!doc) return { spans: [] };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return { spans: [] };
     try {
-      let text = entry.connection.text?.get(filePath);
+      let text = entry.connection.text?.get(docKey);
       if (text === undefined) {
         try {
           text = await promises.readFile(filePath, "utf8");
@@ -718,12 +741,13 @@ function registerLspHandlers() {
   });
 
   electron.ipcMain.handle("lsp:documentSymbol", async (_event, filePath) => {
-    const doc = lspDocuments.get(filePath);
+    const docKey = lspDocKey(filePath);
+    const doc = lspDocuments.get(docKey);
     if (!doc) return { symbols: [] };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return { symbols: [] };
     try {
-      let text = entry.connection.text?.get(filePath);
+      let text = entry.connection.text?.get(docKey);
       if (text === undefined) {
         try {
           text = await promises.readFile(filePath, "utf8");
@@ -756,7 +780,7 @@ function registerLspHandlers() {
   });
 
   electron.ipcMain.handle("lsp:workspaceSymbol", async (_event, filePath, query) => {
-    const doc = lspDocuments.get(filePath);
+    const doc = lspDocuments.get(lspDocKey(filePath));
     if (!doc || !query) return { items: [] };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return { items: [] };
@@ -784,7 +808,7 @@ function registerLspHandlers() {
   });
 
   electron.ipcMain.handle("lsp:rename", async (_event, filePath, line, character, newName) => {
-    const doc = lspDocuments.get(filePath);
+    const doc = lspDocuments.get(lspDocKey(filePath));
     if (!doc) return { ok: false, error: "The file is not open." };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return { ok: false, error: "No language server." };
@@ -817,9 +841,10 @@ function registerLspHandlers() {
     const textByFile = new Map();
     const readText = async (file) => {
       if (textByFile.has(file)) return textByFile.get(file);
-      const d = lspDocuments.get(file);
+      const fk = lspDocKey(file);
+      const d = lspDocuments.get(fk);
       const server = d && lspServers.get(lspKey(d.root, d.serverId));
-      let text = server?.connection?.text?.get(file);
+      let text = server?.connection?.text?.get(fk);
       if (text === undefined) {
         try { text = await promises.readFile(file, "utf8"); } catch { text = ""; }
       }
@@ -858,9 +883,10 @@ function registerLspHandlers() {
     const textByFile = new Map();
     const readText = async (file) => {
       if (textByFile.has(file)) return textByFile.get(file);
-      const d = lspDocuments.get(file);
+      const fk = lspDocKey(file);
+      const d = lspDocuments.get(fk);
       const server = d && lspServers.get(lspKey(d.root, d.serverId));
-      let text = server?.connection?.text?.get(file);
+      let text = server?.connection?.text?.get(fk);
       if (text === undefined) {
         try { text = await promises.readFile(file, "utf8"); } catch { text = ""; }
       }
@@ -883,7 +909,7 @@ function registerLspHandlers() {
   };
 
   electron.ipcMain.handle("lsp:codeActions", async (_event, filePath, startLine, startChar, endLine, endChar, codes) => {
-    const doc = lspDocuments.get(filePath);
+    const doc = lspDocuments.get(lspDocKey(filePath));
     if (!doc) return { actions: [] };
     const entry = lspServers.get(lspKey(doc.root, doc.serverId));
     if (!entry?.connection?.ready) return { actions: [] };

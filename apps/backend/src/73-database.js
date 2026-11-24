@@ -542,7 +542,13 @@ async function dbOpenDriverSession(meta, secret) {
       }
       const { DatabaseSync } = dbLoadSqlite();
       const db = new DatabaseSync(meta.filePath, { readOnly: Boolean(meta.readOnly) });
-      const verRow = db.prepare("SELECT sqlite_version() AS v").get();
+      let verRow;
+      try {
+        verRow = db.prepare("SELECT sqlite_version() AS v").get();
+      } catch (err) {
+        try { db.close(); } catch {}
+        throw err;
+      }
       return {
         engine: "sqlite",
         client: db,
@@ -583,8 +589,15 @@ async function dbOpenDriverSession(meta, secret) {
         connectionTimeoutMillis: 10000,
         query_timeout: 30000,
       });
+      client.on("error", () => void 0);
       await client.connect();
-      const verRes = await client.query("SELECT version() AS v");
+      let verRes;
+      try {
+        verRes = await client.query("SELECT version() AS v");
+      } catch (err) {
+        try { await client.end(); } catch {}
+        throw err;
+      }
       const rawVer = String(verRes.rows?.[0]?.v || "PostgreSQL").split(" on ")[0];
       return {
         engine: "postgres",
@@ -628,7 +641,14 @@ async function dbOpenDriverSession(meta, secret) {
       };
       if (sslOpt) cfg.ssl = sslOpt;
       const conn = await vendor.mysql.createConnection(cfg);
-      const [verRows] = await conn.query("SELECT VERSION() AS v");
+      conn.on("error", () => void 0);
+      let verRows;
+      try {
+        [verRows] = await conn.query("SELECT VERSION() AS v");
+      } catch (err) {
+        try { await conn.end(); } catch {}
+        throw err;
+      }
       return {
         engine: "mysql",
         client: conn,
@@ -676,7 +696,13 @@ async function dbOpenDriverSession(meta, secret) {
       });
       client.on("error", () => void 0);
       await client.connect();
-      const info = await client.info("server");
+      let info;
+      try {
+        info = await client.info("server");
+      } catch (err) {
+        try { client.disconnect(); } catch {}
+        throw err;
+      }
       const m = /redis_version:([^\r\n]+)/.exec(String(info || ""));
       return {
         engine: "redis",
@@ -1976,7 +2002,7 @@ function registerDatabaseHandlers() {
         let applied = 0;
         for (const st of statements) {
           const r = await session.query(st.sql, st.params);
-          applied += Number(r.changes || 1);
+          applied += Number.isFinite(Number(r.changes)) ? Number(r.changes) : 0;
         }
         await session.query("COMMIT", []);
         return { ok: true, applied, sqlPreview };

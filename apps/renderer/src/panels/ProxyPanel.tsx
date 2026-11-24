@@ -32,9 +32,9 @@ import { useProxy } from "@/stores/proxy";
 
 function statusTone(status: number): string {
   if (status >= 500 || status === 0) return "text-status-error";
-  if (status >= 400) return "text-amber-400";
+  if (status >= 400) return "text-status-warn";
   if (status >= 300) return "text-fg-faint";
-  return "text-emerald-400";
+  return "text-status-ok";
 }
 
 
@@ -461,7 +461,7 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
                     <span
                       className={cn(
                         "shrink-0 font-mono text-[10px]",
-                        frame.direction === "up" ? "text-accent" : "text-emerald-400",
+                        frame.direction === "up" ? "text-accent" : "text-status-ok",
                       )}
                       title={frame.direction === "up" ? t("To server") : t("To browser")}
                     >
@@ -490,7 +490,7 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
               <div className="flex h-44 shrink-0 flex-col border-t border-line bg-canvas">
                 <div className="flex shrink-0 items-center justify-between border-b border-line px-2 py-1 text-[10px]">
                   <div className="flex items-center gap-1.5">
-                    <span className={cn("font-mono font-semibold", activeFrame.direction === "up" ? "text-accent" : "text-emerald-400")}>
+                    <span className={cn("font-mono font-semibold", activeFrame.direction === "up" ? "text-accent" : "text-status-ok")}>
                       {activeFrame.direction === "up" ? "▲ TO SERVER" : "▼ FROM SERVER"}
                     </span>
                     {activeFrame.bytes != null && <span className="font-mono text-fg-faint">{activeFrame.bytes} B</span>}
@@ -611,13 +611,13 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
                     {inspectReport.action}
                   </span>
                   {Object.entries(inspectReport.scores).map(([cat, sc]) => (
-                    <span key={cat} className={cn("rounded-sm border px-1.5 py-0.5 font-mono text-[10px]", sc > 0 ? "border-amber-500/40 bg-amber-500/10 text-amber-300" : "border-line text-fg-faint")}>
+                    <span key={cat} className={cn("rounded-sm border px-1.5 py-0.5 font-mono text-[10px]", sc > 0 ? "border-status-warn/40 bg-status-warn/10 text-status-warn" : "border-line text-fg-faint")}>
                       {cat}:{sc}
                     </span>
                   ))}
                 </div>
                 {inspectReport.smugglingVectors.length > 0 && (
-                  <div className="rounded-sm border border-rose-500/40 bg-rose-500/10 p-1.5 font-mono text-[10px] text-rose-300">
+                  <div className="rounded-sm border border-status-error/40 bg-status-error/10 p-1.5 font-mono text-[10px] text-status-error">
                     SMUGGLING: {inspectReport.smugglingVectors.join(", ")}
                   </div>
                 )}
@@ -631,8 +631,8 @@ function Detail({ entry, onClose }: { entry: ProxyEntry; onClose: () => void }) 
                   </div>
                 ))}
                 {inspectReport.drafts.map((d, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-2 rounded-sm border border-sky-500/30 bg-sky-500/10 px-2 py-1 font-mono text-[10px]">
-                    <span className="min-w-0 truncate text-sky-200">{d.snippet}</span>
+                  <div key={idx} className="flex items-center justify-between gap-2 rounded-sm border border-status-info/30 bg-status-info/10 px-2 py-1 font-mono text-[10px]">
+                    <span className="min-w-0 truncate text-status-info">{d.snippet}</span>
                     <button
                       type="button"
                       onClick={() => void copyText(d.snippet).then((ok) => ok && toast.success(t("Copied")))}
@@ -874,9 +874,9 @@ function InterceptEditor({ request, count }: { request: InterceptedRequest; coun
   };
 
   return (
-    <div className="wide-enter-fade shrink-0 border-b-2 border-amber-500/50 bg-amber-500/5">
+    <div className="wide-enter-fade shrink-0 border-b-2 border-status-warn/50 bg-status-warn/5">
       <div className="flex items-center gap-2 px-3 py-1.5">
-        <Hand className="size-3.5 shrink-0 text-amber-400" strokeWidth={1.75} />
+        <Hand className="size-3.5 shrink-0 text-status-warn" strokeWidth={1.75} />
         <span className="min-w-0 flex-1 truncate text-[11px] text-fg" title={request.url}>
           {t("Held")}: {request.method} {request.host}
         </span>
@@ -889,7 +889,7 @@ function InterceptEditor({ request, count }: { request: InterceptedRequest; coun
               key={item.id}
               className={cn(
                 "rounded-sm border px-1.5 py-0.5 text-[9px]",
-                item.id === request.id ? "border-amber-500/50 text-amber-300" : "border-line text-fg-faint",
+                item.id === request.id ? "border-status-warn/50 text-status-warn" : "border-line text-fg-faint",
               )}
               title={`${item.method} ${item.url}`}
             >
@@ -909,14 +909,14 @@ function InterceptEditor({ request, count }: { request: InterceptedRequest; coun
         <button
           type="button"
           onClick={forward}
-          className="flex-1 rounded-sm border border-line bg-emerald-500/10 py-1 text-[11px] text-emerald-300 transition-colors duration-100 hover:bg-emerald-500/20"
+          className="flex-1 rounded-sm border border-line bg-status-ok/10 py-1 text-[11px] text-status-ok transition-colors duration-100 hover:bg-status-ok/20"
         >
           {t("Forward")}
         </button>
         <button
           type="button"
           onClick={() => void useProxy.getState().decide(request.id, "drop")}
-          className="flex-1 rounded-sm border border-line bg-rose-500/10 py-1 text-[11px] text-rose-300 transition-colors duration-100 hover:bg-rose-500/20"
+          className="flex-1 rounded-sm border border-line bg-status-error/10 py-1 text-[11px] text-status-error transition-colors duration-100 hover:bg-status-error/20"
         >
           {t("Drop")}
         </button>
@@ -979,10 +979,10 @@ function ResponseInterceptEditor({ response, count }: { response: InterceptedRes
         className="w-full resize-y border-y border-line bg-canvas px-2 py-1.5 font-mono text-[11px] text-fg outline-none"
       />
       <div className="flex gap-1 px-3 py-1.5">
-        <button type="button" onClick={forward} className="flex-1 rounded-sm border border-line bg-emerald-500/10 py-1 text-[11px] text-emerald-300 transition-colors duration-100 hover:bg-emerald-500/20">
+        <button type="button" onClick={forward} className="flex-1 rounded-sm border border-line bg-status-ok/10 py-1 text-[11px] text-status-ok transition-colors duration-100 hover:bg-status-ok/20">
           {t("Forward")}
         </button>
-        <button type="button" onClick={() => void useProxy.getState().decideResponse(response.id, "drop")} className="flex-1 rounded-sm border border-line bg-rose-500/10 py-1 text-[11px] text-rose-300 transition-colors duration-100 hover:bg-rose-500/20">
+        <button type="button" onClick={() => void useProxy.getState().decideResponse(response.id, "drop")} className="flex-1 rounded-sm border border-line bg-status-error/10 py-1 text-[11px] text-status-error transition-colors duration-100 hover:bg-status-error/20">
           {t("Drop")}
         </button>
         {heldResponses.length > 1 && (
@@ -1067,7 +1067,7 @@ function MatchReplace() {
                   type="button"
                   onClick={() => update(rules.filter((other) => other.id !== rule.id))}
                   title={t("Remove")}
-                  className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-rose-300"
+                  className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-status-error"
                 >
                   <Trash2 className="size-3" strokeWidth={1.75} />
                 </button>
@@ -1132,13 +1132,13 @@ const TrafficRow = memo(function TrafficRow({ entry, selected }: { entry: ProxyE
         {path}
       </span>
       {entry.inspectSummary?.trigger && (
-        <span className="shrink-0 rounded-sm border border-rose-500/40 bg-rose-500/10 px-1 py-0.5 font-mono text-[9px] font-semibold uppercase text-rose-300">
+        <span className="shrink-0 rounded-sm border border-status-error/40 bg-status-error/10 px-1 py-0.5 font-mono text-[9px] font-semibold uppercase text-status-error">
           {entry.inspectSummary.smugglingVectors?.length ? "SMUGGLING" : entry.inspectSummary.trigger}
         </span>
       )}
       {issues ? (
         <span
-          className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 font-mono text-[9px] font-semibold text-amber-400"
+          className="shrink-0 rounded-sm border border-status-warn/40 bg-status-warn/10 px-1 py-0.5 font-mono text-[9px] font-semibold text-status-warn"
           title={`${issues} passive security issue(s) detected`}
         >
           {issues}
@@ -1212,8 +1212,8 @@ export function ProxyPanel() {
             className={cn(
               "flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors duration-100 disabled:opacity-40",
               running
-                ? "bg-rose-500/15 text-rose-400 hover:bg-rose-500/25"
-                : "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25",
+                ? "bg-status-error/15 text-status-error hover:bg-status-error/25"
+                : "bg-status-ok/15 text-status-ok hover:bg-status-ok/25",
             )}
           >
             {running ? (
@@ -1232,7 +1232,7 @@ export function ProxyPanel() {
             aria-pressed={intercepting}
             className={cn(
               "rounded-md p-1 transition-colors duration-100",
-              intercepting ? "bg-amber-500/20 text-amber-400 font-medium" : "text-fg-faint hover:bg-hover hover:text-fg",
+              intercepting ? "bg-status-warn/20 text-status-warn font-medium" : "text-fg-faint hover:bg-hover hover:text-fg",
             )}
           >
             <Hand className="size-3.5" strokeWidth={1.75} />
@@ -1246,7 +1246,7 @@ export function ProxyPanel() {
             aria-pressed={scanning}
             className={cn(
               "rounded-md p-1 transition-colors duration-100",
-              scanning ? "bg-emerald-500/20 text-emerald-400 font-medium" : "text-fg-faint hover:bg-hover hover:text-fg",
+              scanning ? "bg-status-ok/20 text-status-ok font-medium" : "text-fg-faint hover:bg-hover hover:text-fg",
             )}
           >
             <ScanSearch className="size-3.5" strokeWidth={1.75} />

@@ -51,12 +51,12 @@ function ProxyChip({ onOpenPanel }: { onOpenPanel: (id: string) => void }) {
       className={cn(
         "flex shrink-0 items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] font-sans transition-colors duration-100",
         !running && "text-fg-faint hover:text-fg hover:bg-hover/60",
-        running && !intercepting && "bg-emerald-500/10 text-emerald-400 font-medium hover:bg-emerald-500/20",
-        running && intercepting && "bg-amber-500/15 text-amber-400 font-medium animate-pulse hover:bg-amber-500/25",
+        running && !intercepting && "bg-raised/70 text-fg font-medium hover:bg-hover",
+        running && intercepting && "bg-status-warn/12 text-status-warn font-medium hover:bg-status-warn/20",
       )}
     >
       {running ? (
-        <span className={cn("size-1.5 rounded-full shrink-0", intercepting ? "bg-amber-400" : "bg-emerald-400")} />
+        <span className={cn("size-1.5 rounded-full shrink-0", intercepting ? "bg-status-warn" : "bg-status-ok")} />
       ) : (
         <Radio className="size-3 text-fg-faint shrink-0" strokeWidth={2} />
       )}
@@ -280,7 +280,7 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
       >
         {errors === 0 && warnings === 0 ? (
           <span className="flex items-center gap-1 text-fg-faint hover:text-fg">
-            <CheckCircle2 className="size-3 text-emerald-400/80" strokeWidth={2} />
+            <CheckCircle2 className="size-3 text-status-ok/80" strokeWidth={2} />
             <span>0</span>
           </span>
         ) : (
@@ -306,7 +306,7 @@ export function StatusBar({ onOpenPanel }: { onOpenPanel: (id: string) => void }
         className={cn(
           "flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 tabular-nums text-[11px] font-sans transition-all duration-100",
           vulnCount > 0
-            ? "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25 font-medium"
+            ? "bg-status-error/12 text-status-error border border-status-error/30 hover:bg-status-error/20 font-medium"
             : "text-fg-faint hover:text-fg hover:bg-hover/60",
         )}
       >

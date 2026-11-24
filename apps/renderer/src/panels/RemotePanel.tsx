@@ -317,7 +317,7 @@ export function RemotePanel({ onOpenPanel }: { onOpenPanel?: (id: string) => voi
                   <button type="button" onClick={() => { setAdding(false); setEditing(profile); }} title={t("Edit")} aria-label={t("Edit")} className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-fg">
                     <Pencil className="size-3.5" strokeWidth={1.75} />
                   </button>
-                  <button type="button" onClick={() => void useRemote.getState().remove(profile.id)} title={t("Remove")} aria-label={t("Remove")} className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-rose-300">
+                  <button type="button" onClick={() => void useRemote.getState().remove(profile.id)} title={t("Remove")} aria-label={t("Remove")} className="shrink-0 rounded-sm p-0.5 text-fg-faint transition-colors duration-100 hover:bg-hover hover:text-status-error">
                     <Trash2 className="size-3.5" strokeWidth={1.75} />
                   </button>
                 </div>

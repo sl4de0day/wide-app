@@ -29,7 +29,7 @@ function Record({ record }: { record: SssfRecord }) {
       <span
         className={cn(
           "mt-1.5 size-1.5 shrink-0 rounded-full",
-          blocked ? "bg-status-error" : denied ? "bg-amber-400" : "bg-emerald-400",
+          blocked ? "bg-status-error" : denied ? "bg-status-warn" : "bg-status-ok",
         )}
         title={blocked ? t("Blocked") : denied ? t("Denied, but only logged") : t("Allowed")}
       />
@@ -50,7 +50,7 @@ function Record({ record }: { record: SssfRecord }) {
         {record.target ? <span className="text-fg-faint"> · {record.target}</span> : null}
       </span>
       {record.limited && (
-        <span className="shrink-0 text-[10px] text-amber-400">{t("rate limited")}</span>
+        <span className="shrink-0 text-[10px] text-status-warn">{t("rate limited")}</span>
       )}
       {denied && record.reason && (
         <span className="shrink-0 truncate text-[11px] text-status-error" title={t(record.reason)}>
@@ -133,7 +133,7 @@ export function SssfView() {
                   {t("The policy did not compile.")}
                 </span>
               ) : (
-                <span className="flex items-center gap-1.5 text-emerald-400">
+                <span className="flex items-center gap-1.5 text-status-ok">
                   <ShieldCheck className="size-4" strokeWidth={1.75} />
                   {status.mode === "enforce"
                     ? t("Enforcing")
@@ -170,7 +170,7 @@ export function SssfView() {
             <div className="mt-2 flex items-center gap-1.5 text-[12px]">
               {verdict.ok ? (
                 <>
-                  <CheckCircle2 className="size-4 text-emerald-400" strokeWidth={1.75} />
+                  <CheckCircle2 className="size-4 text-status-ok" strokeWidth={1.75} />
                   <span className="text-fg-dim">
                     {verdict.chained
                       ? t("The audit chain is intact across {count} records.", { count: verdict.records })

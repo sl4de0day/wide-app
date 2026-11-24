@@ -43,12 +43,12 @@ interface RunState {
 function methodTone(m: string): string {
   switch (m) {
     case "GET":
-      return "text-emerald-400";
+      return "text-status-ok";
     case "POST":
-      return "text-amber-400";
+      return "text-status-warn";
     case "PUT":
     case "PATCH":
-      return "text-sky-400";
+      return "text-status-info";
     case "DELETE":
       return "text-status-error";
     default:
@@ -195,7 +195,7 @@ function HistoryPanel() {
               title={`${item.method} ${item.url}`}
               className="flex w-full items-center gap-1.5 px-2 py-0.5 text-left text-[10px] hover:bg-hover"
             >
-              <span className={cn("shrink-0 font-mono", item.status >= 500 ? "text-status-error" : item.status >= 400 ? "text-amber-400" : "text-emerald-400")}>{item.status || "—"}</span>
+              <span className={cn("shrink-0 font-mono", item.status >= 500 ? "text-status-error" : item.status >= 400 ? "text-status-warn" : "text-status-ok")}>{item.status || "—"}</span>
               <span className="shrink-0 font-mono text-fg-faint">{item.method}</span>
               <span className="min-w-0 flex-1 truncate text-fg-dim">{item.url}</span>
             </button>
@@ -503,7 +503,7 @@ function ResponsePane({ run }: { run: RunState | undefined }) {
   if (!resp) return <div className="flex flex-1 items-center justify-center text-[12px] text-fg-faint">{t("Send the request to see the response.")}</div>;
   if (!resp.ok) return <p className="p-3 text-[12px] text-status-error">{t(resp.error ?? "")}</p>;
 
-  const tone = (resp.status ?? 0) >= 500 ? "text-status-error" : (resp.status ?? 0) >= 400 ? "text-amber-400" : "text-emerald-400";
+  const tone = (resp.status ?? 0) >= 500 ? "text-status-error" : (resp.status ?? 0) >= 400 ? "text-status-warn" : "text-status-ok";
   const passed = tests.filter((x) => x.passed).length;
   const failed = tests.length - passed;
 
@@ -525,7 +525,7 @@ function ResponsePane({ run }: { run: RunState | undefined }) {
           <button type="button" onClick={() => setTab("tests")} className={cn("flex items-center gap-1 rounded-sm px-1.5 py-0.5", tab === "tests" ? "bg-selected text-fg" : "text-fg-faint hover:text-fg")}>
             {t("Tests")}
             {tests.length > 0 && (
-              <span className={cn("rounded px-1 text-[9px]", failed > 0 ? "bg-status-error/20 text-status-error" : "bg-emerald-500/20 text-emerald-400")}>{passed}/{tests.length}</span>
+              <span className={cn("rounded px-1 text-[9px]", failed > 0 ? "bg-status-error/20 text-status-error" : "bg-status-ok/20 text-status-ok")}>{passed}/{tests.length}</span>
             )}
           </button>
           {logs.length > 0 && (
@@ -575,7 +575,7 @@ function ResponsePane({ run }: { run: RunState | undefined }) {
           ) : (
             tests.map((x, i) => (
               <div key={i} className="flex items-start gap-2 border-b border-line/40 py-1">
-                <span className={cn("shrink-0 font-mono text-[10px]", x.passed ? "text-emerald-400" : "text-status-error")}>{x.passed ? "PASS" : "FAIL"}</span>
+                <span className={cn("shrink-0 font-mono text-[10px]", x.passed ? "text-status-ok" : "text-status-error")}>{x.passed ? "PASS" : "FAIL"}</span>
                 <span className="min-w-0 flex-1">
                   <span className="text-fg">{x.name}</span>
                   {x.error && <span className="block font-mono text-[10px] text-status-error">{t(x.error)}</span>}

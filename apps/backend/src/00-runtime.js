@@ -27,6 +27,7 @@ const node_net = require("node:net");
 const node_tls = require("node:tls");
 const node_http2 = require("node:http2");
 const node_zlib = require("node:zlib");
+const node_url = require("node:url");
 const { StringDecoder } = require("node:string_decoder");
 
 function killProcessTree(child) {
@@ -82,7 +83,7 @@ function reportRecoverableError(scope, action, error, options = {}) {
   if (typeof __wideTs === "object" && __wideTs && typeof __wideTs.reportRecoverableError === "function") {
     __wideTs.reportRecoverableError(scope, action, error, {
       ...options,
-      onFault: typeof reportFault === "function" ? reportFault : undefined,
+      onFault: typeof reportFatal === "function" ? reportFatal : undefined,
       logger: console,
     });
     return;
@@ -97,7 +98,7 @@ function reportRecoverableError(scope, action, error, options = {}) {
       : String(error ?? "Unknown error");
   if (options.level === "error") console.error(`[${scope}] ${action}: ${message}`);
   else console.warn(`[${scope}] ${action}: ${message}`);
-  if (options.surfaceToUi && typeof reportFault === "function") {
-    reportFault(scope, `${action}: ${message}`);
+  if (options.surfaceToUi && typeof reportFatal === "function") {
+    reportFatal(scope, `${action}: ${message}`);
   }
 }

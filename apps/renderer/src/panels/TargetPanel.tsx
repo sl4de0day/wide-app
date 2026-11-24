@@ -44,19 +44,19 @@ function endpointBadgeForEntry(entry: ProxyEntry): "REST" | "GraphQL" | "SOAP" |
 
 function statusTone(status: number): string {
   if (status >= 500 || status === 0) return "text-status-error";
-  if (status >= 400) return "text-amber-400";
+  if (status >= 400) return "text-status-warn";
   if (status >= 300) return "text-fg-faint";
-  return "text-emerald-400";
+  return "text-status-ok";
 }
 
 function methodBadgeColor(method: string): string {
   const m = (method || "").toUpperCase();
-  if (m === "GET") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-400";
+  if (m === "GET") return "border-status-ok/40 bg-status-ok/10 text-status-ok";
   if (m === "POST") return "border-accent/40 bg-accent/10 text-accent";
-  if (m === "PUT") return "border-amber-500/40 bg-amber-500/10 text-amber-400";
-  if (m === "DELETE") return "border-rose-500/40 bg-rose-500/10 text-rose-400";
-  if (m === "PATCH") return "border-purple-500/40 bg-purple-500/10 text-purple-400";
-  if (m === "WS") return "border-teal-500/40 bg-teal-500/10 text-teal-400";
+  if (m === "PUT") return "border-status-warn/40 bg-status-warn/10 text-status-warn";
+  if (m === "DELETE") return "border-status-error/40 bg-status-error/10 text-status-error";
+  if (m === "PATCH") return "border-accent/40 bg-accent/10 text-accent";
+  if (m === "WS") return "border-status-ok/40 bg-status-ok/10 text-status-ok";
   return "border-line bg-panel text-fg-dim";
 }
 
@@ -248,7 +248,7 @@ function RequestRow({
         {entry.method}
       </span>
       {epBadge ? (
-        <span className="shrink-0 rounded-sm border border-sky-500/40 bg-sky-500/10 px-1 py-0.2 font-mono text-[9px] font-semibold text-sky-300">
+        <span className="shrink-0 rounded-sm border border-status-info/40 bg-status-info/10 px-1 py-0.2 font-mono text-[9px] font-semibold text-status-info">
           {epBadge}
         </span>
       ) : null}
@@ -256,7 +256,7 @@ function RequestRow({
         {path === "/" ? host : path}
       </span>
       {issues ? (
-        <span className="shrink-0 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1 py-0.2 font-mono text-[9px] font-semibold text-amber-400">
+        <span className="shrink-0 rounded-sm border border-status-warn/40 bg-status-warn/10 px-1 py-0.2 font-mono text-[9px] font-semibold text-status-warn">
           {issues}
         </span>
       ) : null}
@@ -308,7 +308,7 @@ function TreeRow({
         </span>
         {isHost && (
           inScope ? (
-            <ShieldCheck className="size-3.5 shrink-0 text-emerald-400" strokeWidth={1.75} />
+            <ShieldCheck className="size-3.5 shrink-0 text-status-ok" strokeWidth={1.75} />
           ) : (
             <Globe className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.75} />
           )
@@ -726,7 +726,7 @@ export function TargetPanel() {
         <div className="flex items-center gap-3 font-mono">
           <span>Hosts: <strong className="text-fg">{stats.totalHosts}</strong></span>
           <span>Endpoints: <strong className="text-fg">{stats.totalEndpoints}</strong></span>
-          <span>Sensitive: <strong className="text-amber-400">{stats.sensitiveCount}</strong></span>
+          <span>Sensitive: <strong className="text-status-warn">{stats.sensitiveCount}</strong></span>
           <span>Params: <strong className="text-accent">{stats.totalParams}</strong></span>
         </div>
       </div>

@@ -65,7 +65,7 @@ export function CodeActionMenu() {
             {action.kind === "refactor" ? (
               <Wrench className="size-3.5 shrink-0 text-fg-faint" strokeWidth={1.75} />
             ) : (
-              <Lightbulb className="size-3.5 shrink-0 text-amber-400" strokeWidth={1.75} />
+              <Lightbulb className="size-3.5 shrink-0 text-status-warn" strokeWidth={1.75} />
             )}
             <span className="min-w-0 flex-1 truncate">{action.title}</span>
           </button>

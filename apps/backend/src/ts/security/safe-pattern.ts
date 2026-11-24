@@ -102,6 +102,9 @@ function parseEscapeChar(pat: string, pos: number): { ch: number; nextPos: numbe
   if (c >= "1" && c <= "9") {
     failPattern("BackreferenceUnsupported", `backreference \\${c} rejected to prevent exponential backtracking`);
   }
+  if (c === "b" || c === "B") {
+    failPattern("InvalidEscape", `word boundary \\${c} is unsupported in Thompson NFA`);
+  }
   if ("dDwWsS".includes(c)) return { ch: -1, nextPos: pos + 1, shorthand: c };
   if (c === "n") return { ch: 0x0a, nextPos: pos + 1 };
   if (c === "r") return { ch: 0x0d, nextPos: pos + 1 };
@@ -403,21 +406,113 @@ class RegexCompiler {
   }
 }
 
-function extractSimpleLiterals(pattern: string, caseInsensitive: boolean): string[] {
-  const parts = pattern.replace(/^\(\?[ims]+\)/i, "").split("|");
-  if (parts.length > 1) {
-    const lits = parts.map((p) => p.replace(/[^A-Za-z0-9_./:-]/g, "")).filter((l) => l.length >= 3);
-    return lits.length === parts.length ? lits.map((l) => (caseInsensitive ? l.toLowerCase() : l)) : [];
-  }
-  const runs = pattern.match(/[A-Za-z0-9_./:-]{3,}/g) || [];
+function extractBranchBestLiteral(branch: string): string {
   let best = "";
-  for (const r of runs) {
-    const idx = pattern.indexOf(r);
-    const nextChar = pattern[idx + r.length];
-    if (nextChar === "*" || nextChar === "?" || nextChar === "{") continue;
-    if (r.length > best.length) best = r;
+  let cur = "";
+  let inClass = false;
+  let depth = 0;
+
+  const flush = () => {
+    if (cur.length > best.length) best = cur;
+    cur = "";
+  };
+
+  const isOptionalNext = (idx: number): boolean => {
+    const ch = branch[idx];
+    return ch === "*" || ch === "?" || (ch === "{" && /^\{\s*0\s*(?:,|\})/.test(branch.slice(idx, idx + 12)));
+  };
+
+  for (let i = 0; i < branch.length; i += 1) {
+    const c = branch[i];
+    if (inClass) {
+      if (c === "\\") { i += 1; continue; }
+      if (c === "]") inClass = false;
+      continue;
+    }
+    if (c === "[") {
+      flush();
+      inClass = true;
+      continue;
+    }
+    if (c === "(") {
+      flush();
+      depth += 1;
+      continue;
+    }
+    if (c === ")") {
+      flush();
+      if (depth > 0) depth -= 1;
+      continue;
+    }
+    if (depth > 0) {
+      if (c === "\\") i += 1;
+      continue;
+    }
+    if (c === "\\") {
+      if (i + 1 >= branch.length) { flush(); break; }
+      const next = branch[i + 1];
+      if ("dDwWsSbB0123456789xXuUpPkKc".includes(next)) {
+        flush();
+        i += 1;
+        continue;
+      }
+      if (isOptionalNext(i + 2)) {
+        flush();
+        i += 1;
+        continue;
+      }
+      cur += next;
+      i += 1;
+      continue;
+    }
+    if (".^$*+?{}|".includes(c)) {
+      flush();
+      continue;
+    }
+    if (isOptionalNext(i + 1)) {
+      flush();
+      continue;
+    }
+    cur += c;
   }
-  if (!best) return [];
+  flush();
+  return best;
+}
+
+function extractSimpleLiterals(pattern: string, caseInsensitive: boolean): string[] {
+  const clean = pattern.replace(/^\(\?[ims]+\)/i, "");
+  const parts: string[] = [];
+  let depth = 0;
+  let inClass = false;
+  let escaped = false;
+  let start = 0;
+  for (let i = 0; i < clean.length; i += 1) {
+    const c = clean[i];
+    if (escaped) { escaped = false; continue; }
+    if (c === "\\") { escaped = true; continue; }
+    if (c === "[" && !inClass) { inClass = true; continue; }
+    if (c === "]" && inClass) { inClass = false; continue; }
+    if (inClass) continue;
+    if (c === "(") depth += 1;
+    else if (c === ")" && depth > 0) depth -= 1;
+    else if (c === "|" && depth === 0) {
+      parts.push(clean.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(clean.slice(start));
+
+  if (parts.length > 1) {
+    const lits: string[] = [];
+    for (const p of parts) {
+      const lit = extractBranchBestLiteral(p);
+      if (lit.length < 3) return [];
+      lits.push(caseInsensitive ? lit.toLowerCase() : lit);
+    }
+    return lits;
+  }
+  const best = extractBranchBestLiteral(clean);
+  if (best.length < 3) return [];
   return [caseInsensitive ? best.toLowerCase() : best];
 }
 

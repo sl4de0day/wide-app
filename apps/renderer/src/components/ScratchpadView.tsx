@@ -186,7 +186,7 @@ export function ScratchpadView() {
                     title="Delete Note"
                     aria-label="Delete Note"
                     onClick={(e) => deleteNote(note.id, e)}
-                    className="opacity-0 group-hover:opacity-100 hover:text-status-danger p-0.5 rounded transition-opacity"
+                    className="opacity-0 group-hover:opacity-100 hover:text-status-error p-0.5 rounded transition-opacity"
                   >
                     <Trash2 className="size-2.5" />
                   </button>
@@ -243,7 +243,7 @@ export function ScratchpadView() {
             title="Clear Note"
             aria-label="Clear Note"
             onClick={handleClear}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-hover hover:text-status-danger transition-colors"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-hover hover:text-status-error transition-colors"
           >
             <Trash2 className="size-3.5" />
             <span className="text-[11px]">Clear</span>

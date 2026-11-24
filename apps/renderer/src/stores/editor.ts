@@ -979,16 +979,23 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   relocate: (oldPath, newPath) => {
     const repoint = (path: string) => repointPath(path, oldPath, newPath);
-    set((state) => ({
-      tabs: state.tabs.map((tab) => {
-        if (tab.kind !== "file") return tab;
-        const path = repoint(tab.path);
-        return path === tab.path ? tab : { ...tab, path, name: basename(path) };
-      }),
-      activePath: state.activePath ? repoint(state.activePath) : state.activePath,
-
-      lastFilePath: state.lastFilePath ? repoint(state.lastFilePath) : state.lastFilePath,
-    }));
+    set((state) => {
+      const nextPanes: typeof state.panes = {};
+      for (const [id, pane] of Object.entries(state.panes)) {
+        nextPanes[id] = pane.activePath ? { ...pane, activePath: repoint(pane.activePath) } : pane;
+      }
+      return {
+        tabs: state.tabs.map((tab) => {
+          if (tab.kind !== "file" && tab.kind !== "media") return tab;
+          const path = repoint(tab.path);
+          return path === tab.path ? tab : { ...tab, path, name: basename(path) };
+        }),
+        panes: nextPanes,
+        activePath: state.activePath ? repoint(state.activePath) : state.activePath,
+        splitPath: state.splitPath ? repoint(state.splitPath) : state.splitPath,
+        lastFilePath: state.lastFilePath ? repoint(state.lastFilePath) : state.lastFilePath,
+      };
+    });
     useAiEdits.getState().relocate(oldPath, newPath);
   },
 

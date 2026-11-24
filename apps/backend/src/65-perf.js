@@ -149,7 +149,11 @@ function startEngineServer(root, port) {
         "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": "*"
       });
-      node_fs.createReadStream(file).pipe(response);
+      const readStream = node_fs.createReadStream(file);
+      readStream.on("error", () => {
+        try { if (!response.writableEnded) response.end(); } catch {}
+      });
+      readStream.pipe(response);
       record2({
         method: request.method ?? "GET",
         path,
@@ -448,7 +452,7 @@ async function listEntries(root) {
 }
 
 const WATCH_SETTLE_MS = 180;
-const WATCH_IGNORED = /(^|[\/])(\.git|node_modules|\.venv|venv|__pycache__|vendor|target|_build|deps|\.gradle)([\/]|$)/;
+const WATCH_IGNORED = /(^|[\\/])(\.git|node_modules|\.venv|venv|__pycache__|vendor|target|_build|deps|\.gradle)([\\/]|$)/;
 
 let watcher = null;
 let watchTimer = null;

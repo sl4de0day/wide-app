@@ -1356,7 +1356,7 @@ async function checkAiTrustArchitecture() {
     Buffer,
     setTimeout,
     __wideTs: tsModules,
-    reportFault: (k, d) => faultCalls.push([k, d]),
+    reportFatal: (k, d) => faultCalls.push([k, d]),
   });
   vm.runInContext(runtimeSrc.slice(runtimeSrc.indexOf('function reportRecoverableError')), rtCtx);
   rtCtx.reportRecoverableError('secscan', 'missing optional file', Object.assign(new Error('no file'), { code: 'ENOENT' }), { ignoreCodes: ['ENOENT'] });
@@ -1794,9 +1794,9 @@ async function checkAiTrustArchitecture() {
       node_os: os,
       node_http: require('node:http'),
       __wideTs: tsModules,
-      getAiSessionAntigravityMeta: async (id) => agyMeta.get(id) || { conversationId: '' },
+      getAiSessionAntigravityMeta: async (id) => agyMeta.get(id) || { antigravityConversationId: '' },
       setAiSessionAntigravityMeta: async (id, meta) => {
-        const cur = agyMeta.get(id) || { conversationId: '' };
+        const cur = agyMeta.get(id) || { antigravityConversationId: '' };
         agyMeta.set(id, { ...cur, ...meta });
       },
       AI_TOOLS: allToolSpecs,
@@ -1805,10 +1805,10 @@ async function checkAiTrustArchitecture() {
         const target = pathSync.resolve(root, String(rel || ''));
         const normRoot = pathSync.resolve(root);
         if (target === normRoot || target.startsWith(normRoot + pathSync.sep)) {
-          if (target.startsWith(pathSync.join(normRoot, 'outside'))) return null;
-          return target;
+          if (target.startsWith(pathSync.join(normRoot, 'outside'))) return { error: 'outside workspace' };
+          return { path: target, relative: pathSync.relative(normRoot, target).replace(/\\/g, '/') };
         }
-        return null;
+        return { error: 'outside workspace' };
       },
       aiDiffCounts: (before, after) => ({
         added: before === after ? 0 : 1,
@@ -1822,7 +1822,8 @@ async function checkAiTrustArchitecture() {
     vm.runInContext(agySrc, agyCtx, { filename: '50-ai-antigravity.js' });
     agyCtx.registerAntigravityHandlers();
 
-    const stInitial = await agyHandlers.get('ai:antigravityStatus')({ force: true });
+    const stInitial = await agyHandlers.get('ai:antigravityStatus')(null, { force: true });
+    const loginAlready = await agyHandlers.get('ai:antigravityLogin')();
     const attachReply = await agyHandlers.get('ai:antigravityAttachMcp')();
     const mcpRecord = fsSync.existsSync(mockMcpStateFile) ? fsSync.readFileSync(mockMcpStateFile, 'utf8') : '';
 
@@ -1862,11 +1863,16 @@ async function checkAiTrustArchitecture() {
     const agyVer = agyEv1.find((e) => e.type === 'verification');
 
     report(
-      stInitial?.installed === true &&
+      stInitial?.ok === true &&
+        stInitial?.installed === true &&
         stInitial?.signedIn === true &&
         stInitial?.version === '1.4.12' &&
         stInitial?.mcpAttached === false &&
+        loginAlready?.ok === true &&
+        loginAlready?.signedIn === true &&
+        loginAlready?.alreadySignedIn === true &&
         attachReply?.ok === true &&
+        attachReply?.status?.ok === true &&
         attachReply?.status?.mcpAttached === true &&
         mcpRecord.includes('Authorization: Bearer ') &&
         mcpRecord.includes('--type http wide http://127.0.0.1:') &&
@@ -1875,12 +1881,12 @@ async function checkAiTrustArchitecture() {
         Boolean(apid1) &&
         apid2Match?.[1] === apid1 &&
         agyEdits.length === 1 &&
-        agyEdits[0].path === 'demo.ts' &&
+        agyEdits[0].path === pathSync.join(workRoot, 'demo.ts') &&
         agyEdits[0].staged === false &&
         agyEdits[0].oldContent === 'export const a = 1;\n' &&
         agyEdits[0].content === 'export const a = 2;\n' &&
         agyVer?.ok === true &&
-        agyMeta.get('agy-smoke-sess')?.conversationId === 'agy-conv-1',
+        agyMeta.get('agy-smoke-sess')?.antigravityConversationId === 'agy-conv-1',
       'Persistent Antigravity worker reuses warm PID, ignores non-workspace edits, snapshots workspace diffs, verifies post-edit, and attaches HTTP MCP',
     );
   } finally {

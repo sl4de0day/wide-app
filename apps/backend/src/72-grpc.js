@@ -129,6 +129,7 @@ function grpcUnary(loadId, target, service, method, message, metadata, tls) {
     }
     const name = resolveMethod(client, method);
     if (!name) {
+      try { client.close(); } catch {}
       resolve({ ok: false, error: `Method ${method} not found or is streaming.` });
       return;
     }
@@ -144,6 +145,7 @@ function grpcUnary(loadId, target, service, method, message, metadata, tls) {
         else resolve({ ok: true, response, ms: Date.now() - started });
       });
     } catch (e) {
+      try { client.close(); } catch {}
       resolve({ ok: false, error: String(e && e.message ? e.message : e) });
     }
   });
@@ -160,7 +162,10 @@ function grpcServerStream(id, loadId, target, service, method, message, metadata
     return { ok: false, error: String(e && e.message ? e.message : e) };
   }
   const name = resolveMethod(client, method);
-  if (!name) return { ok: false, error: `Method ${method} not found.` };
+  if (!name) {
+    try { client.close(); } catch {}
+    return { ok: false, error: `Method ${method} not found.` };
+  }
   try {
     const call = client[name](message || {}, makeMetadata(metadata));
     grpcStreams.set(id, { call, client });
@@ -175,6 +180,7 @@ function grpcServerStream(id, loadId, target, service, method, message, metadata
     });
     return { ok: true, id };
   } catch (e) {
+    try { client.close(); } catch {}
     return { ok: false, error: String(e && e.message ? e.message : e) };
   }
 }

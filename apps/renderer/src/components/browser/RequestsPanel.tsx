@@ -26,9 +26,9 @@ function pathOf(url: string): string {
 
 function statusTone(status: number): string {
   if (status >= 500 || status === 0) return "text-status-error";
-  if (status >= 400) return "text-amber-400";
+  if (status >= 400) return "text-status-warn";
   if (status >= 300) return "text-fg-faint";
-  return "text-emerald-400";
+  return "text-status-ok";
 }
 
 export function BrowserRequestsPanel({ host }: { host: string | null }) {

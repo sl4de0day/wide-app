@@ -3,6 +3,7 @@
 const OLLAMA_HOST = "127.0.0.1";
 const OLLAMA_PORT = 11434;
 const OLLAMA_START_TIMEOUT_MS = 30000;
+const OLLAMA_AGENT = new node_http.Agent({ keepAlive: true, keepAliveMsecs: 30000 });
 
 function ollamaRequest(method, path, body, { signal, timeout = 60000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -12,7 +13,6 @@ function ollamaRequest(method, path, body, { signal, timeout = 60000 } = {}) {
     }
     const payload = body === undefined ? null : JSON.stringify(body);
     let stream = null;
-    const keepAliveAgent = new node_http.Agent({ keepAlive: true, keepAliveMsecs: 30000 });
     const request = node_http.request(
       {
         host: OLLAMA_HOST,
@@ -28,7 +28,7 @@ function ollamaRequest(method, path, body, { signal, timeout = 60000 } = {}) {
           : { "connection": "keep-alive" },
         timeout,
         signal,
-        agent: keepAliveAgent,
+        agent: OLLAMA_AGENT,
       },
       (response) => {
         stream = response;

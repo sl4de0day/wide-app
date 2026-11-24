@@ -42,6 +42,30 @@ function shutdownServicesSync() {
     stopOast,
     stopBuiltinOast,
     discordRpcShutdown,
+    () => { try { debugStop(); } catch {} },
+    () => { try { dapStop(); } catch {} },
+    () => {
+      if (webtoolsServer) {
+        try { webtoolsServer.close(); } catch {}
+        webtoolsServer = null;
+      }
+    },
+    () => {
+      if (workspaceWatchTimer) {
+        clearTimeout(workspaceWatchTimer);
+        workspaceWatchTimer = null;
+      }
+      if (workspaceWatcher) {
+        try { workspaceWatcher.close(); } catch {}
+        workspaceWatcher = null;
+      }
+    },
+    () => {
+      for (const entry of aiPersistentTerminals.values()) {
+        try { entry.kill?.(); } catch {}
+      }
+      aiPersistentTerminals.clear();
+    },
   ];
   for (const step of syncSteps) {
     try {

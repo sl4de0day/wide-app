@@ -9,9 +9,9 @@ import { useOast } from "@/stores/oast";
 
 function protoTone(p: string): string {
   const proto = p.toLowerCase();
-  if (proto.startsWith("http")) return "text-emerald-400";
-  if (proto === "dns") return "text-sky-400";
-  if (proto === "smtp") return "text-amber-400";
+  if (proto.startsWith("http")) return "text-status-ok";
+  if (proto === "dns") return "text-status-info";
+  if (proto === "smtp") return "text-status-warn";
   return "text-fg-dim";
 }
 
@@ -49,7 +49,7 @@ export function CollaboratorView() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-panel">
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-        <Radio className={cn("size-4 shrink-0", running ? "text-emerald-400" : "text-fg-faint")} strokeWidth={1.75} />
+        <Radio className={cn("size-4 shrink-0", running ? "text-status-ok" : "text-fg-faint")} strokeWidth={1.75} />
         <span className="flex-1 text-[12px] font-medium text-fg">{t("Collaborator")}</span>
         <span className="text-[11px] text-fg-faint">{running ? t("listening") : t("stopped")}</span>
         {interactions.length > 0 && (
@@ -61,7 +61,7 @@ export function CollaboratorView() {
 
       <div className="shrink-0 border-b border-line p-2">
         {!ready && (
-          <p className="mb-2 rounded-sm border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300">
+          <p className="mb-2 rounded-sm border border-status-warn/40 bg-status-warn/10 px-2 py-1 text-[11px] text-status-warn">
             {t("Install interactsh-client from Extensions to use the Collaborator.")}
           </p>
         )}
@@ -88,11 +88,11 @@ export function CollaboratorView() {
             </button>
           ) : (
             <>
-              <button type="button" onClick={() => void useOast.getState().startBuiltin()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-emerald-300 hover:bg-hover" title={t("A zero-setup listener on this machine — reachable only by targets that can reach your host")}>
+              <button type="button" onClick={() => void useOast.getState().startBuiltin()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-status-ok hover:bg-hover" title={t("A zero-setup listener on this machine — reachable only by targets that can reach your host")}>
                 <Play className="size-3" strokeWidth={2} fill="currentColor" />
                 {t("Start built-in")}
               </button>
-              <button type="button" onClick={() => void useOast.getState().start()} disabled={!ready || !server.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-emerald-300 hover:bg-hover disabled:opacity-40" title={t("Use your own interactsh server for internet-facing out-of-band testing")}>
+              <button type="button" onClick={() => void useOast.getState().start()} disabled={!ready || !server.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-1 text-[11px] text-status-ok hover:bg-hover disabled:opacity-40" title={t("Use your own interactsh server for internet-facing out-of-band testing")}>
                 <Play className="size-3" strokeWidth={2} fill="currentColor" />
                 {t("Start interactsh")}
               </button>
@@ -111,7 +111,7 @@ export function CollaboratorView() {
             </button>
           </div>
         )}
-        {copied && <p className="mt-1 truncate text-[10px] text-emerald-400" title={copied}>{t("Copied")}: {copied}</p>}
+        {copied && <p className="mt-1 truncate text-[10px] text-status-ok" title={copied}>{t("Copied")}: {copied}</p>}
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">

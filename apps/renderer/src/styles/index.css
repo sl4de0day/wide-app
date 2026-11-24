@@ -60,8 +60,10 @@
   --fg-faint: #6d7a91;
 
   --status-error: #bf616a;
+  --status-high: #d08770;
   --status-warn: #ebcb8b;
   --status-ok: #a3be8c;
+  --status-info: #88c0d0;
 
   --syn-text: #d8dee9;
   --syn-keyword: #81a1c1;
@@ -147,8 +149,10 @@
   --fg-faint: #565f89;
 
   --status-error: #f7768e;
+  --status-high: #ff9e64;
   --status-warn: #e0af68;
   --status-ok: #9ece6a;
+  --status-info: #7dcfff;
 
   --syn-text: #c0caf5;
   --syn-keyword: #bb9af7;
@@ -216,8 +220,10 @@
   --fg-faint: #5c6370;
 
   --status-error: #e06c75;
+  --status-high: #d19a66;
   --status-warn: #e5c07b;
   --status-ok: #98c379;
+  --status-info: #56b6c2;
 
   --syn-text: #abb2bf;
   --syn-keyword: #c678dd;
@@ -284,9 +290,11 @@
   --fg-dim: #8b90a0;
   --fg-faint: #666973;
 
-  --status-error: #ff6b6b;
-  --status-warn: #e5e773;
-  --status-ok: #7fe37c;
+  --status-error: #e07b88;
+  --status-high: #df9f7a;
+  --status-warn: #dfd686;
+  --status-ok: #88cfa0;
+  --status-info: #85b1df;
 
   --syn-text: #b9bed5;
   --syn-keyword: #7f7ce3;
@@ -350,8 +358,10 @@
   --color-fg-faint: var(--fg-faint);
 
   --color-status-error: var(--status-error);
+  --color-status-high: var(--status-high);
   --color-status-warn: var(--status-warn);
   --color-status-ok: var(--status-ok);
+  --color-status-info: var(--status-info);
 
   --color-ring: var(--accent);
 

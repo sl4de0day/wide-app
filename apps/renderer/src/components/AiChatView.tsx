@@ -382,6 +382,9 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
     toast.success(t("Running in terminal."));
   };
 
+  const codeRef = useRef(code);
+  codeRef.current = code;
+
   useEffect(() => {
     let active = true;
     const mount = async () => {
@@ -400,7 +403,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
       if (grammar) extensions.push(grammar);
 
       const state = EditorState.create({
-        doc: code,
+        doc: codeRef.current,
         extensions,
       });
 
@@ -474,8 +477,8 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
           >
             {copied ? (
               <>
-                <Check className="size-3.5 text-emerald-400" strokeWidth={2} />
-                <span className="text-emerald-400 text-[11px]">{t("Copied")}</span>
+                <Check className="size-3.5 text-accent" strokeWidth={2} />
+                <span className="text-accent text-[11px]">{t("Copied")}</span>
               </>
             ) : (
               <>
@@ -822,12 +825,12 @@ function DiffSlidePanel({
           {(added > 0 || removed > 0) && (
             <div className="flex shrink-0 items-center gap-1.5 pl-1">
               {added > 0 && (
-                <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-emerald-400">
+                <span className="rounded bg-status-ok/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-status-ok">
                   +{added}
                 </span>
               )}
               {removed > 0 && (
-                <span className="rounded bg-rose-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-rose-400">
+                <span className="rounded bg-status-error/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-status-error">
                   −{removed}
                 </span>
               )}
@@ -917,14 +920,14 @@ function DiffSlidePanel({
                     ref={idx === 0 ? firstChangeRef : undefined}
                     className={cn(
                       "flex items-stretch border-l-[3px] px-2 py-0.5",
-                      row.type === "add" && "border-emerald-500 bg-emerald-500/20 text-emerald-200",
-                      row.type === "del" && "border-rose-500 bg-rose-500/20 text-rose-200",
+                      row.type === "add" && "border-status-ok/60 bg-status-ok/10 text-fg",
+                      row.type === "del" && "border-status-error/60 bg-status-error/10 text-fg",
                     )}
                   >
                     <span
                       className={cn(
                         "w-10 shrink-0 select-none pr-2.5 text-right font-mono text-[10.5px] tabular-nums",
-                        row.type === "add" ? "text-emerald-400/80" : "text-rose-400/80",
+                        row.type === "add" ? "text-status-ok/75" : "text-status-error/75",
                       )}
                     >
                       {lineNo ?? ""}
@@ -932,7 +935,7 @@ function DiffSlidePanel({
                     <span
                       className={cn(
                         "w-4 shrink-0 select-none text-center font-bold text-[12px]",
-                        row.type === "add" ? "text-emerald-400" : "text-rose-400",
+                        row.type === "add" ? "text-status-ok" : "text-status-error",
                       )}
                     >
                       {row.type === "add" ? "+" : "−"}
@@ -1274,7 +1277,7 @@ function AgentProcessStream({
         return;
       }
     }
-    const read = await bridge.readFile(item.fullPath);
+    const read = await bridge.readFile(item.fullPath).catch(() => null);
     if (!read || read.error || read.content == null) {
       onFailure(t("{name} could not be opened.", { name: item.fileName }));
       return;
@@ -1300,8 +1303,8 @@ function AgentProcessStream({
           onClick={() => setUserExpanded(!isExpanded)}
           className="flex items-center gap-2 py-1 px-2.5 rounded-lg border border-line/60 bg-panel/75 hover:bg-hover/70 transition-all text-left select-none text-[12px] group/proc w-fit shadow-sm"
         >
-          <div className="flex size-4 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400 shrink-0">
-            <Check className="size-2.5" strokeWidth={3} />
+          <div className="flex size-4 items-center justify-center rounded-full border border-line bg-canvas text-status-ok shrink-0">
+            <Check className="size-2.5" strokeWidth={2.5} />
           </div>
           <span className="font-medium text-fg">
             {t("{count} steps", { count: enrichedSteps.length })}
@@ -1309,8 +1312,8 @@ function AgentProcessStream({
           </span>
           {(totalAdded > 0 || totalRemoved > 0) && (
             <span className="flex items-center gap-1 font-mono text-[10.5px] shrink-0 select-none ml-0.5">
-              {totalAdded > 0 && <span className="text-emerald-400 font-semibold">+{totalAdded}</span>}
-              {totalRemoved > 0 && <span className="text-rose-400 font-semibold">−{totalRemoved}</span>}
+              {totalAdded > 0 && <span className="text-status-ok font-semibold">+{totalAdded}</span>}
+              {totalRemoved > 0 && <span className="text-status-error font-semibold">−{totalRemoved}</span>}
             </span>
           )}
           <ChevronRight
@@ -1353,8 +1356,8 @@ function AgentProcessStream({
 
                   {(item.added > 0 || item.removed > 0) && (
                     <span className="flex items-center gap-1 font-mono text-[11px] shrink-0 select-none">
-                      {item.added > 0 && <span className="text-emerald-400 font-semibold">+{item.added}</span>}
-                      {item.removed > 0 && <span className="text-rose-400 font-semibold">−{item.removed}</span>}
+                      {item.added > 0 && <span className="text-status-ok font-semibold">+{item.added}</span>}
+                      {item.removed > 0 && <span className="text-status-error font-semibold">−{item.removed}</span>}
                     </span>
                   )}
 
@@ -1376,9 +1379,9 @@ function AgentProcessStream({
                     <span
                       className={cn(
                         "rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold shrink-0 select-none",
-                        item.httpStatus >= 200 && item.httpStatus < 300 && "bg-emerald-500/15 text-emerald-400",
-                        item.httpStatus >= 300 && item.httpStatus < 400 && "bg-amber-500/15 text-amber-300",
-                        item.httpStatus >= 400 && "bg-rose-500/15 text-rose-400",
+                        item.httpStatus >= 200 && item.httpStatus < 300 && "bg-status-ok/12 text-status-ok",
+                        item.httpStatus >= 300 && item.httpStatus < 400 && "bg-status-warn/12 text-status-warn",
+                        item.httpStatus >= 400 && "bg-status-error/12 text-status-error",
                       )}
                     >
                       {item.httpStatus}
@@ -1386,7 +1389,7 @@ function AgentProcessStream({
                   )}
 
                   {item.step.staged && (
-                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-300 shrink-0 select-none">
+                    <span className="rounded bg-status-warn/12 px-1.5 py-0.5 font-mono text-[10px] font-medium text-status-warn shrink-0 select-none">
                       {t("Staged")}
                     </span>
                   )}
@@ -1396,10 +1399,10 @@ function AgentProcessStream({
                       className={cn(
                         "rounded px-1.5 py-0.5 font-mono text-[10px] font-medium shrink-0 select-none",
                         item.step.verification.errors > 0
-                          ? "bg-rose-500/15 text-rose-400"
+                          ? "bg-status-error/12 text-status-error"
                           : item.step.verification.warnings > 0
-                            ? "bg-amber-500/15 text-amber-300"
-                            : "bg-emerald-500/15 text-emerald-400",
+                            ? "bg-status-warn/12 text-status-warn"
+                            : "border border-line bg-panel text-fg-dim",
                       )}
                       title={item.step.verification.diagnostics?.map((d) => `L${d.line}: ${d.message}`).join("\n") || ""}
                     >
@@ -1432,7 +1435,7 @@ function AgentProcessStream({
                   )}
 
                   {isCommand && item.exitCode !== null && item.exitCode !== 0 && (
-                    <span className="text-[11px] text-rose-400 shrink-0 select-none">
+                    <span className="text-[11px] text-status-error shrink-0 select-none">
                       · {t("Exited with code {code}", { code: item.exitCode })}
                     </span>
                   )}
@@ -1457,7 +1460,7 @@ function AgentProcessStream({
                         className="group/thumb relative w-fit overflow-hidden rounded-lg border border-line/70 bg-canvas text-left shadow-sm"
                       >
                         <img
-                          src={`data:image/jpeg;base64,${liveBrowserFrame}`}
+                          src={liveBrowserFrame.startsWith("data:") ? liveBrowserFrame : `data:image/jpeg;base64,${liveBrowserFrame}`}
                           alt={liveBrowserUrl || "Browser"}
                           className="block max-h-36 w-auto object-cover"
                         />
@@ -1543,7 +1546,7 @@ const Turn = memo(function Turn({
           className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-fg-faint opacity-0 transition-all duration-100 hover:bg-hover hover:text-fg group-hover/user:opacity-100"
         >
           {copied ? (
-            <Check className="size-3 text-emerald-400" strokeWidth={2} />
+            <Check className="size-3 text-accent" strokeWidth={2} />
           ) : (
             <Copy className="size-3" strokeWidth={1.75} />
           )}
@@ -1565,7 +1568,7 @@ const Turn = memo(function Turn({
             onClick={onUndoToHere}
             title={t("Undo to this point")}
             aria-label={t("Undo to this point")}
-            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-fg-faint opacity-0 transition-all duration-100 hover:bg-rose-500/15 hover:text-rose-400 group-hover/user:opacity-100"
+            className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-fg-faint opacity-0 transition-all duration-100 hover:bg-status-error/12 hover:text-status-error group-hover/user:opacity-100"
           >
             <RotateCcw className="size-3" strokeWidth={1.75} />
           </button>
@@ -1625,8 +1628,8 @@ const Turn = memo(function Turn({
             >
               {copied ? (
                 <>
-                  <Check className="size-3 text-emerald-400" strokeWidth={2} />
-                  <span className="text-emerald-400">{t("Copied")}</span>
+                  <Check className="size-3 text-accent" strokeWidth={2} />
+                  <span className="text-accent">{t("Copied")}</span>
                 </>
               ) : (
                 <>
@@ -1654,7 +1657,7 @@ const Turn = memo(function Turn({
               onClick={onUndoToHere}
               title={t("Undo to this point")}
               aria-label={t("Undo to this point")}
-              className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-fg-faint transition-colors duration-100 hover:bg-rose-500/15 hover:text-rose-400"
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-fg-faint transition-colors duration-100 hover:bg-status-error/12 hover:text-status-error"
             >
               <RotateCcw className="size-3" strokeWidth={1.75} />
               <span className="hidden sm:inline">{t("Undo")}</span>
@@ -1958,12 +1961,12 @@ function PermissionBanner({ sessionId, activeTurn }: { sessionId: string; active
   if (matching.length === 0) return null;
 
   return (
-    <div className="shrink-0 border-t border-amber-500/30 bg-amber-500/10 px-6 py-2.5">
+    <div className="shrink-0 border-t border-status-warn/30 bg-status-warn/8 px-6 py-2.5">
       <div className="mx-auto flex w-full max-w-[760px] flex-col gap-2">
         {matching.map((req) => (
-          <div key={req.requestId} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-500/30 bg-panel/95 px-3 py-2 shadow-sm">
+          <div key={req.requestId} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-status-warn/30 bg-panel px-3 py-2 shadow-sm">
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 text-[12px] font-semibold text-amber-300">
+              <div className="flex items-center gap-1.5 text-[12px] font-semibold text-status-warn">
                 <Shield className="size-3.5 shrink-0" strokeWidth={2} />
                 <span>{req.title || t("Confirmation required")}</span>
               </div>
@@ -1985,7 +1988,7 @@ function PermissionBanner({ sessionId, activeTurn }: { sessionId: string; active
               <button
                 type="button"
                 onClick={() => void replyPermission(req.requestId, true)}
-                className="rounded-md bg-amber-500/20 border border-amber-500/40 px-2.5 py-1 text-[11.5px] font-medium text-amber-200 hover:bg-amber-500/30 transition-colors"
+                className="rounded-md border border-status-warn/40 bg-status-warn/15 px-2.5 py-1 text-[11.5px] font-medium text-fg-bright hover:bg-status-warn/25 transition-colors"
               >
                 {t("Allow")}
               </button>
@@ -2345,6 +2348,12 @@ function useSpeechInput(onResult: (text: string) => void) {
     setListening(true);
   }, [listening, onResult, supported]);
 
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.stop(); } catch {}
+    };
+  }, []);
+
   return { listening, toggle, supported };
 }
 
@@ -2418,8 +2427,8 @@ export function AiChatView({ id }: { id: string }) {
       const filePath = reply?.ok && reply.path && reply.exists ? reply.path : targetPath;
 
       if (!reply?.exists) {
-        const read = await bridge.readFile(filePath);
-        if (read?.error) {
+        const read = await bridge.readFile(filePath).catch(() => null);
+        if (!read || read.error) {
           await bridge.writeFile(filePath, "");
           void useWorkspace.getState().refresh();
         }
@@ -2927,7 +2936,8 @@ export function AiChatView({ id }: { id: string }) {
                     }
                     if ((event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === "Tab") {
                       event.preventDefault();
-                      pickMention(mentionMatches[mentionIndex]);
+                      const picked = mentionMatches[mentionIndex] ?? mentionMatches[0];
+                      if (picked) pickMention(picked);
                       return;
                     }
                   }
@@ -2949,7 +2959,8 @@ export function AiChatView({ id }: { id: string }) {
                     }
                     if ((event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === "Tab") {
                       event.preventDefault();
-                      pickSlash(slashMatches[slashIndex]);
+                      const picked = slashMatches[slashIndex] ?? slashMatches[0];
+                      if (picked) pickSlash(picked);
                       return;
                     }
                   }
@@ -2999,7 +3010,7 @@ export function AiChatView({ id }: { id: string }) {
                       aria-label={listening ? t("Stop listening") : t("Speak your message")}
                       className={cn(
                         "flex size-8 items-center justify-center rounded-lg text-fg-dim transition-colors hover:bg-hover hover:text-fg",
-                        listening && "bg-accent/15 text-accent animate-pulse",
+                        listening && "border border-accent/40 bg-accent/15 text-accent",
                       )}
                     >
                       {listening ? <MicOff className="size-4" strokeWidth={1.75} /> : <Mic className="size-4" strokeWidth={1.75} />}
@@ -3013,7 +3024,7 @@ export function AiChatView({ id }: { id: string }) {
                       aria-label={t("Stop")}
                       disabled={stopping}
                       className={cn(
-                        "flex size-8 items-center justify-center rounded-full bg-rose-500 hover:bg-rose-600 text-white shadow-sm transition-all active:scale-95",
+                        "flex size-8 items-center justify-center rounded-full border border-line-strong bg-raised text-fg-bright shadow-sm transition-all hover:border-status-error/50 hover:bg-status-error/15 hover:text-status-error active:scale-95",
                         stopping && "opacity-60",
                       )}
                     >
@@ -3026,7 +3037,7 @@ export function AiChatView({ id }: { id: string }) {
                       disabled={!draft.trim() || !ready || !loaded}
                       title={t("Send")}
                       aria-label={t("Send")}
-                      className="flex size-8 items-center justify-center rounded-full bg-accent hover:opacity-90 text-white shadow-sm transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                      className="flex size-8 items-center justify-center rounded-full bg-accent hover:opacity-90 text-fg-bright shadow-sm transition-all active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
                     >
                       <ArrowRight className="size-4" strokeWidth={2.5} />
                     </button>

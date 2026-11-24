@@ -52,10 +52,10 @@ export function ScrollbarAnnotations({
             style={{ top: `${pct}%` }}
             className={`absolute right-[2px] w-[8px] h-[3px] rounded-xs cursor-pointer pointer-events-auto transition-all hover:w-[12px] hover:h-[5px] ${
               isError
-                ? "bg-rose-500 shadow-xs shadow-rose-500/70"
+                ? "bg-status-error"
                 : isWarn
-                  ? "bg-amber-400 shadow-xs shadow-amber-400/70"
-                  : "bg-sky-400 shadow-xs shadow-sky-400/50"
+                  ? "bg-status-warn"
+                  : "bg-status-info"
             }`}
           />
         );
@@ -69,7 +69,7 @@ export function ScrollbarAnnotations({
             onClick={() => onJumpLine(f.line)}
             title={`[SECURITY] ${f.message || f.ruleId}: line ${f.line}`}
             style={{ top: `${pct}%` }}
-            className="absolute right-[2px] w-[8px] h-[3px] rounded-xs cursor-pointer pointer-events-auto bg-purple-500 shadow-xs shadow-purple-500/70 transition-all hover:w-[12px] hover:h-[5px]"
+            className="absolute right-[2px] w-[8px] h-[3px] rounded-xs cursor-pointer pointer-events-auto bg-accent transition-all hover:w-[12px] hover:h-[5px]"
           />
         );
       })}

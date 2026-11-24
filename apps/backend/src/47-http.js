@@ -133,15 +133,14 @@ function sendSingleHop(target, method, headers, body, redirectsLeft, options) {
       if (tlsPreset?.ciphers) requestOptions.ciphers = tlsPreset.ciphers;
     }
 
-    let targetArg = url;
-    if (isProxied && url.protocol === "http:") {
+    const useProxyHttpOptions = isProxied && url.protocol === "http:";
+    if (useProxyHttpOptions) {
       requestOptions.host = options.proxy.host || "127.0.0.1";
       requestOptions.port = options.proxy.port;
       requestOptions.path = url.href;
       if (!requestOptions.headers["host"] && !requestOptions.headers["Host"]) {
         requestOptions.headers["host"] = url.host;
       }
-      targetArg = requestOptions;
     }
 
     let settled = false;
@@ -168,10 +167,7 @@ function sendSingleHop(target, method, headers, body, redirectsLeft, options) {
       signal.addEventListener("abort", onAbort, { once: true });
     }
 
-    request = transport.request(
-      targetArg,
-      requestOptions,
-      (response) => {
+    const onResponse = (response) => {
         const location = response.headers.location;
         if (
           location &&
@@ -237,8 +233,11 @@ function sendSingleHop(target, method, headers, body, redirectsLeft, options) {
             redirects: chain,
           });
         });
-      },
-    );
+      };
+
+    request = useProxyHttpOptions
+      ? transport.request(requestOptions, onResponse)
+      : transport.request(url, requestOptions, onResponse);
 
     request.setTimeout(HTTP_TIMEOUT_MS, () => {
       request.destroy();

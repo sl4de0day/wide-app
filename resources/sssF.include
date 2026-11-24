@@ -548,6 +548,7 @@ bind "ai:tool.list"     to ai.read   { root = arg 0, path = arg 1 }
 bind "ai:tool.read"     to ai.read   { root = arg 0, path = arg 1 }
 bind "ai:tool.search"   to ai.read   { root = arg 0, path = arg 0 }
 bind "ai:tool.write"    to ai.write  { root = arg 0, path = arg 1 }
+bind "ai:tool.exec"     to shell.exec { root = arg 0, command = arg 1 }
 bind "ai:tool.mcp"      to ai.mcp    { path = arg 0 }
 bind "ai:commitFile"    to ai.write  { root = arg 0, path = arg 1 }
 
@@ -567,6 +568,7 @@ bind "db:connect"          to db.read   { id = arg 0 }
 bind "db:disconnect"       to db.manage { id = arg 0 }
 bind "db:schema"           to db.read   { id = arg 0 }
 bind "db:query"            to db.read   { id = arg 0 }
+bind "db:cancel"           to db.manage
 bind "db:applyChanges"     to db.write  { id = arg 0 }
 bind "db:export"           to db.read   { id = arg 0 }
 bind "db:audit"            to db.manage { id = arg 0 }

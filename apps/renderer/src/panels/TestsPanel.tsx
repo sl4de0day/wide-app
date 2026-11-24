@@ -9,8 +9,8 @@ import { useTests, type TestStatus } from "@/stores/tests";
 import { useWorkspace } from "@/stores/workspace";
 
 function StatusDot({ status }: { status: TestStatus | undefined }) {
-  if (status === "pass") return <CircleCheck className="size-3.5 shrink-0 text-emerald-400" strokeWidth={2} />;
-  if (status === "fail") return <CircleX className="size-3.5 shrink-0 text-rose-400" strokeWidth={2} />;
+  if (status === "pass") return <CircleCheck className="size-3.5 shrink-0 text-status-ok" strokeWidth={2} />;
+  if (status === "fail") return <CircleX className="size-3.5 shrink-0 text-status-error" strokeWidth={2} />;
   return <span className="size-3.5 shrink-0" />;
 }
 

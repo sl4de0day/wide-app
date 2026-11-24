@@ -169,6 +169,13 @@ function registerOastHandlers() {
         }
       }
     });
+    child.on("error", () => {
+      if (oastChild === child) {
+        oastChild = null;
+        oastDomain = "";
+        broadcast("oast:status", { running: false, domain: "", server: oastServer });
+      }
+    });
     child.on("exit", () => {
       if (oastChild === child) {
         oastChild = null;

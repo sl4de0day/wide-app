@@ -218,17 +218,22 @@ async function debugStop() {
   const session = dbg;
   dbg = null;
   if (!session) return;
+  if (session.pending && typeof session.pending.values === "function") {
+    for (const entry of session.pending.values()) {
+      try { entry.reject?.(new Error("Debug session stopped.")); } catch {}
+    }
+    session.pending.clear();
+  }
+  try {
+    session.socket && session.socket.destroy();
+  } catch {}
   try {
     session.ws && session.ws.close();
-  } catch {
-
-  }
+  } catch {}
   if (session.browser) return;
   try {
     if (session.child) killProcessTree(session.child);
-  } catch {
-
-  }
+  } catch {}
 }
 
 async function debugStart(event, cwd, file, breakpoints) {
@@ -244,6 +249,10 @@ async function debugStart(event, cwd, file, breakpoints) {
   } catch (error) {
     return { ok: false, error: String(error.message || error) };
   }
+  child.on("error", (err) => {
+    debugEmit({ type: "output", stream: "stderr", text: String(err?.message || err) });
+    if (dbg && dbg.child === child) dbg = null;
+  });
 
   dbg = {
     child,

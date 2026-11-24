@@ -180,7 +180,8 @@ function testCommand(framework, rel, name) {
   if (framework === "go") {
     const args = ["test"];
     if (name) args.push("-run", `^${name}$`);
-    args.push(rel ? "./" + rel.replace(/\/[^/]+$/, "") : "./...");
+    const goPkg = rel ? (rel.includes("/") ? "./" + rel.replace(/\/[^/]+$/, "") : ".") : "./...";
+    args.push(goPkg);
     return { command: "go", args };
   }
   if (framework === "cargo") {
@@ -205,7 +206,7 @@ function parseFailures(framework, output) {
       const m = /^test\s+(\S+)\s+\.\.\.\s+FAILED/.exec(line);
       if (m) failures.add(m[1].split("::").pop());
     } else {
-      const m = /^\s*(?:×|✗|✕|FAIL)\s+(.+?)(?:\s+\d+ms)?\s*$/.exec(line);
+      const m = /^\s*(?:\u00d7|\u2717|\u2715|FAIL)\s+(.+?)(?:\s+\d+ms)?\s*$/.exec(line);
       if (m) failures.add(m[1].trim());
     }
   }

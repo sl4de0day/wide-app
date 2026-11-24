@@ -42,20 +42,20 @@ function EditRow({ edit, chained }: { edit: PendingEdit; chained: string | null 
           <span className="truncate text-[12px] text-fg" title={edit.path}>
             {basename(edit.path)}
           </span>
-          <span className="shrink-0 font-mono text-[10px] text-emerald-400">+{added}</span>
-          <span className="shrink-0 font-mono text-[10px] text-rose-400">−{removed}</span>
+          <span className="shrink-0 font-mono text-[10px] text-status-ok">+{added}</span>
+          <span className="shrink-0 font-mono text-[10px] text-status-error">−{removed}</span>
         </button>
         <button
           type="button"
           onClick={() => void useAiEdits.getState().accept(edit.id)}
-          className="shrink-0 rounded-sm border border-line bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300 transition-colors duration-100 hover:bg-emerald-500/20"
+          className="shrink-0 rounded-sm border border-line bg-status-ok/10 px-2 py-0.5 text-[10px] text-status-ok transition-colors duration-100 hover:bg-status-ok/20"
         >
           {t("Accept")}
         </button>
         <button
           type="button"
           onClick={() => useAiEdits.getState().reject(edit.id)}
-          className="shrink-0 rounded-sm border border-line bg-rose-500/10 px-2 py-0.5 text-[10px] text-rose-300 transition-colors duration-100 hover:bg-rose-500/20"
+          className="shrink-0 rounded-sm border border-line bg-status-error/10 px-2 py-0.5 text-[10px] text-status-error transition-colors duration-100 hover:bg-status-error/20"
         >
           {t("Reject")}
         </button>
@@ -67,8 +67,8 @@ function EditRow({ edit, chained }: { edit: PendingEdit; chained: string | null 
               key={index}
               className={cn(
                 "flex gap-2 whitespace-pre-wrap break-all px-2",
-                row.type === "add" && "bg-emerald-500/10 text-emerald-300",
-                row.type === "del" && "bg-rose-500/10 text-rose-300",
+                row.type === "add" && "bg-status-ok/10 text-status-ok",
+                row.type === "del" && "bg-status-error/10 text-status-error",
                 row.type === "same" && "text-fg-dim",
               )}
             >
@@ -101,14 +101,14 @@ export function AiEditsOverlay() {
           <button
             type="button"
             onClick={() => void useAiEdits.getState().acceptAll()}
-            className="rounded-sm border border-line bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-300 transition-colors duration-100 hover:bg-emerald-500/20"
+            className="rounded-sm border border-line bg-status-ok/10 px-2 py-1 text-[11px] text-status-ok transition-colors duration-100 hover:bg-status-ok/20"
           >
             {t("Accept all")}
           </button>
           <button
             type="button"
             onClick={() => useAiEdits.getState().rejectAll()}
-            className="rounded-sm border border-line bg-rose-500/10 px-2 py-1 text-[11px] text-rose-300 transition-colors duration-100 hover:bg-rose-500/20"
+            className="rounded-sm border border-line bg-status-error/10 px-2 py-1 text-[11px] text-status-error transition-colors duration-100 hover:bg-status-error/20"
           >
             {t("Reject all")}
           </button>

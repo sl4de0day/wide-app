@@ -650,6 +650,7 @@ function compileCondition(node, sets, diagnostics) {
       const resolved = resolvePattern(node.pattern, sets, diagnostics);
       return (context) => {
         if (typeof context.command !== "string" || context.command.length === 0) return false;
+        if (resolved.kind === "safe_regex") return __wideTs.matchSafePattern(resolved.prog, context.command);
         if (resolved.kind === "regex") return testRegexp(resolved.regexp, context.command);
         return resolved.patterns.some((pattern) => testRegexp(pattern.regexp, context.command));
       };
@@ -663,6 +664,7 @@ function compileCondition(node, sets, diagnostics) {
       return (context) => {
         const value = context.args?.[node.index];
         if (typeof value !== "string") return false;
+        if (resolved.kind === "safe_regex") return __wideTs.matchSafePattern(resolved.prog, value);
         if (resolved.kind === "regex") return testRegexp(resolved.regexp, value);
         return resolved.patterns.some((pattern) => testRegexp(pattern.regexp, value));
       };

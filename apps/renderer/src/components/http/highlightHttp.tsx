@@ -21,7 +21,7 @@ function withMarks(text: string, state: MarkState, keyBase: string): ReactNode {
       <mark
         key={`${keyBase}-m${idx}`}
         data-match={idx}
-        className={idx === state.active ? "rounded-sm bg-amber-400 text-black" : "rounded-sm bg-amber-400/25 text-inherit"}
+        className={idx === state.active ? "rounded-sm bg-status-warn text-canvas" : "rounded-sm bg-status-warn/25 text-inherit"}
       >
         {text.slice(at, at + q.length)}
       </mark>,

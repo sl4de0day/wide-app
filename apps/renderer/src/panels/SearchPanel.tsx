@@ -99,7 +99,7 @@ export function SearchPanel() {
             {t("Replace all")}
           </button>
         </div>
-        {notice && <p className="pt-1 text-[11px] text-emerald-300">{notice}</p>}
+        {notice && <p className="pt-1 text-[11px] text-status-ok">{notice}</p>}
 
         <p className="pt-1.5 text-[11px] text-fg-faint">
           {error

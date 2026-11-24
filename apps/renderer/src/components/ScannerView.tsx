@@ -11,9 +11,9 @@ import { useScanner } from "@/stores/scanner";
 
 const SEV_TONE: Record<Severity, string> = {
   critical: "text-status-error",
-  high: "text-amber-400",
-  medium: "text-yellow-300",
-  low: "text-sky-400",
+  high: "text-status-warn",
+  medium: "text-status-warn",
+  low: "text-status-info",
   info: "text-fg-faint",
 };
 const SEV_ORDER: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
@@ -64,7 +64,7 @@ export function ScannerView() {
       <div className="shrink-0 border-b border-line p-2">
         <div className="flex items-center gap-1 pb-1">
           <span className="flex-1 text-[10px] uppercase tracking-wide text-fg-faint">{t("Paste a request with parameters, then scan")}</span>
-          <button type="button" onClick={launch} disabled={!draft.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-0.5 text-[11px] text-emerald-300 hover:bg-hover disabled:opacity-40">
+          <button type="button" onClick={launch} disabled={!draft.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-0.5 text-[11px] text-status-ok hover:bg-hover disabled:opacity-40">
             <Play className="size-3" strokeWidth={2} fill="currentColor" />
             {t("Scan")}
           </button>
@@ -89,7 +89,7 @@ export function ScannerView() {
             spellCheck={false}
             className="min-w-0 flex-1 rounded-sm border border-line bg-canvas px-2 py-0.5 font-mono text-[11px] text-fg outline-none focus:border-accent placeholder:text-fg-faint"
           />
-          <button type="button" onClick={() => crawlSeed.trim() && useScanner.getState().crawlScan(crawlSeed.trim())} disabled={!crawlSeed.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-0.5 text-[11px] text-sky-300 hover:bg-hover disabled:opacity-40">
+          <button type="button" onClick={() => crawlSeed.trim() && useScanner.getState().crawlScan(crawlSeed.trim())} disabled={!crawlSeed.trim()} className="flex items-center gap-1 rounded-sm border border-line px-2 py-0.5 text-[11px] text-status-info hover:bg-hover disabled:opacity-40">
             <Network className="size-3" strokeWidth={2} />
             {t("Crawl")}
           </button>
@@ -147,7 +147,7 @@ export function ScannerView() {
           <button type="button" onClick={() => setShowSession((v) => !v)} className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-fg-faint transition-colors duration-100 hover:text-fg">
             <KeyRound className="size-3" strokeWidth={1.75} />
             {t("Authenticated session")}
-            {session.trim() && <span className="text-emerald-400">•</span>}
+            {session.trim() && <span className="text-status-ok">•</span>}
           </button>
           {showSession && (
             <textarea
@@ -174,7 +174,7 @@ export function ScannerView() {
                 {task.done}/{task.total || "…"}
               </span>
               {task.issueCount > 0 && (
-                <span className="inline-flex items-center gap-1 tabular-nums text-amber-400">
+                <span className="inline-flex items-center gap-1 tabular-nums text-status-warn">
                   <span>{task.issueCount}</span>
                   <Flag className="size-2.5 shrink-0" />
                 </span>
@@ -257,7 +257,7 @@ export function ScannerView() {
             </button>
           </div>
           <div className="pb-1 text-[10px] uppercase tracking-wide text-fg-faint">{t("Evidence")}</div>
-          <pre className="whitespace-pre-wrap break-all rounded-sm bg-canvas px-2 py-1 font-mono text-[11px] text-amber-300">{chosen.evidence}</pre>
+          <pre className="whitespace-pre-wrap break-all rounded-sm bg-canvas px-2 py-1 font-mono text-[11px] text-status-warn">{chosen.evidence}</pre>
           <div className="py-1 text-[10px] uppercase tracking-wide text-fg-faint">{t("Request")}</div>
           <pre className="whitespace-pre-wrap break-all rounded-sm bg-canvas px-2 py-1 font-mono text-[11px] text-fg-dim">{chosen.request}</pre>
         </div>

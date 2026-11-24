@@ -201,7 +201,11 @@ function LocalHalf() {
   const asked = useRef("");
   useEffect(() => {
     const wanted = query.trim();
-    if (wanted.length < 2 || asked.current === wanted) return;
+    if (wanted.length < 2) {
+      asked.current = "";
+      return;
+    }
+    if (asked.current === wanted) return;
     const timer = setTimeout(() => {
       asked.current = wanted;
       void useAi.getState().search();
@@ -265,7 +269,7 @@ function LocalHalf() {
                 </span>
               </div>
               <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-accent/15">
-                <div className="h-full w-2/5 animate-[pulse_1.5s_ease-in-out_infinite] rounded-full bg-accent" />
+                <div className="h-full w-2/5 wide-pulse rounded-full bg-accent" />
               </div>
               <p className="mt-1.5 text-[10px] text-fg-faint">
                 {t("Please do not close Wide while setup is in progress.")}
@@ -274,21 +278,21 @@ function LocalHalf() {
           )}
 
           {ollamaError && (
-            <div className="mt-2.5 rounded-md border border-rose-500/30 bg-rose-500/10 p-2.5 text-[11px]">
+            <div className="mt-2.5 rounded-md border border-status-error/30 bg-status-error/10 p-2.5 text-[11px]">
               <div className="flex items-start gap-2">
-                <AlertCircle className="mt-0.5 size-4 shrink-0 text-rose-400" />
+                <AlertCircle className="mt-0.5 size-4 shrink-0 text-status-error" />
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-rose-300">
+                  <div className="font-semibold text-status-error">
                     {t("Ollama installation / start error")}
                   </div>
-                  <p className="mt-0.5 break-words leading-tight text-rose-300/80">
+                  <p className="mt-0.5 break-words leading-tight text-fg-dim">
                     {ollamaError}
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => void useAi.getState().setupOllama()}
-                      className="inline-flex items-center gap-1 rounded bg-rose-500/20 px-2.5 py-1 text-[10px] font-medium text-rose-200 transition-colors hover:bg-rose-500/30"
+                      className="inline-flex items-center gap-1 rounded border border-status-error/30 bg-status-error/12 px-2.5 py-1 text-[10px] font-medium text-fg transition-colors hover:bg-status-error/20"
                     >
                       <RotateCw className="size-3" />
                       <span>{t("Retry")}</span>
@@ -296,7 +300,7 @@ function LocalHalf() {
                     <button
                       type="button"
                       onClick={() => void bridge.openExternal("https://ollama.com/download")}
-                      className="inline-flex items-center gap-1 rounded bg-rose-500/20 px-2.5 py-1 text-[10px] font-medium text-rose-200 transition-colors hover:bg-rose-500/30"
+                      className="inline-flex items-center gap-1 rounded border border-line bg-panel px-2.5 py-1 text-[10px] font-medium text-fg-dim transition-colors hover:bg-hover hover:text-fg"
                     >
                       <ExternalLink className="size-3" />
                       <span>{t("Download Manually (ollama.com)")}</span>
@@ -307,7 +311,7 @@ function LocalHalf() {
                   type="button"
                   title={t("Dismiss")}
                   onClick={() => useAi.getState().clearOllamaError()}
-                  className="rounded p-0.5 text-rose-400/60 transition-colors hover:bg-rose-500/20 hover:text-rose-400"
+                  className="rounded p-0.5 text-fg-faint transition-colors hover:bg-hover hover:text-fg"
                 >
                   <X className="size-3.5" />
                 </button>
@@ -465,7 +469,7 @@ function ClaudeCodeCard() {
   };
 
   useEffect(() => {
-    if (claudeProbe) return;
+    if (claudeProbe?.installed && claudeProbe?.signedIn) return;
     check();
   }, []);
 
@@ -504,14 +508,14 @@ function ClaudeCodeCard() {
           <span
             className={cn(
               "size-2 shrink-0 rounded-full",
-              state.signedIn ? "bg-emerald-400" : state.installed ? "bg-amber-400" : "bg-fg-faint/40",
+              state.signedIn ? "bg-status-ok" : state.installed ? "bg-status-warn" : "bg-fg-faint/40",
             )}
           />
           <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", selected ? "text-fg-bright" : "text-fg")}>
             Claude Code
           </span>
           {subBadge && state.signedIn && (
-            <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9.5px] font-medium uppercase text-emerald-400">
+            <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[9.5px] font-medium uppercase text-accent">
               {subBadge}
             </span>
           )}
@@ -519,7 +523,7 @@ function ClaudeCodeCard() {
             {busy ? t("Working…") : !state.checked ? t("Checking…") : state.installed ? "" : t("Install")}
           </span>
         </button>
-        {state.installed && (
+        {state.checked && (
           <button
             type="button"
             disabled={busy}
@@ -656,14 +660,16 @@ function AntigravityCard() {
         mcpAttached: Boolean(reply.ok && reply.mcpAttached),
         models,
       };
-      useAi.getState().setAntigravityModels(models);
+      if (models.length > 0) {
+        useAi.getState().setAntigravityModels(models);
+      }
       setState(antigravityProbe);
     });
   };
 
   useEffect(() => {
-    if (antigravityProbe) return;
-    check(false);
+    if (antigravityProbe?.installed && antigravityProbe?.signedIn) return;
+    check(Boolean(antigravityProbe));
   }, []);
 
   const act = async (what: "install" | "login" | "attachMcp") => {
@@ -699,7 +705,7 @@ function AntigravityCard() {
           <span
             className={cn(
               "size-2 shrink-0 rounded-full",
-              state.signedIn ? "bg-emerald-400" : state.installed ? "bg-amber-400" : "bg-fg-faint/40",
+              state.signedIn ? "bg-status-ok" : state.installed ? "bg-status-warn" : "bg-fg-faint/40",
             )}
           />
           <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", selected ? "text-fg-bright" : "text-fg")}>
@@ -714,7 +720,7 @@ function AntigravityCard() {
             {busy ? t("Working…") : !state.checked ? t("Checking…") : state.installed ? "" : t("Install")}
           </span>
         </button>
-        {state.installed && (
+        {state.checked && (
           <button
             type="button"
             disabled={busy}
@@ -748,7 +754,7 @@ function AntigravityCard() {
             <div className="flex items-center justify-between gap-2 text-[10.5px] text-fg-faint">
               <span className="truncate">{t("Connected via Google Antigravity")}</span>
               {state.mcpAttached ? (
-                <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9.5px] font-medium text-emerald-400">
+                <span className="shrink-0 rounded border border-line bg-panel px-1.5 py-0.5 text-[9.5px] font-medium text-fg-dim">
                   {t("Wide MCP attached")}
                 </span>
               ) : (
@@ -845,8 +851,8 @@ function CodexCard() {
   };
 
   useEffect(() => {
-    if (codexProbe) return;
-    check(false);
+    if (codexProbe?.installed && codexProbe?.signedIn) return;
+    check(Boolean(codexProbe));
   }, []);
 
   const act = async (what: "install" | "login" | "logout") => {
@@ -902,7 +908,7 @@ function CodexCard() {
           <span
             className={cn(
               "size-2 shrink-0 rounded-full",
-              state.signedIn ? "bg-emerald-400" : state.installed ? "bg-amber-400" : "bg-fg-faint/40",
+              state.signedIn ? "bg-status-ok" : state.installed ? "bg-status-warn" : "bg-fg-faint/40",
             )}
           />
           <span className={cn("min-w-0 flex-1 truncate text-[12px] font-medium", selected ? "text-fg-bright" : "text-fg")}>
@@ -917,7 +923,7 @@ function CodexCard() {
             {busy ? t("Working…") : !state.checked ? t("Checking…") : state.installed ? "" : t("Install")}
           </span>
         </button>
-        {state.installed && (
+        {state.checked && (
           <button
             type="button"
             disabled={busy}
@@ -1093,7 +1099,7 @@ export function ModelPicker({ className }: { className?: string } = {}) {
               : "border border-line text-fg-dim hover:bg-hover hover:text-fg",
         )}
       >
-        <span className={cn("size-1.5 shrink-0 rounded-full", ready ? "bg-emerald-400" : "bg-fg-faint/40")} />
+        <span className={cn("size-1.5 shrink-0 rounded-full", ready ? "bg-status-ok" : "bg-fg-faint/40")} />
         <span className="min-w-0 truncate">{label}</span>
         <ChevronDown className={cn("size-3 shrink-0 transition-transform duration-150", open && "rotate-180")} strokeWidth={2} />
       </button>

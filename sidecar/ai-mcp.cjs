@@ -93,7 +93,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     ? request.params.arguments
     : {};
   try {
-    const reply = await httpRequest("POST", "/tool", { name, input, root: ROOT }, 120000);
+    const reply = await httpRequest("POST", "/tool", { name, arguments: input, input, root: ROOT }, 120000);
     const text =
       typeof reply.json?.result === "string"
         ? reply.json.result

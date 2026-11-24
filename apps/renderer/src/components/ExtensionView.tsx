@@ -257,7 +257,7 @@ function ExtensionSettings({ extension }: { extension: MarketplaceExtension }) {
     <div className="mt-6 rounded-md border border-line p-3">
       <p className="flex items-center gap-2 pb-2 text-[12px] font-medium text-fg">
         {t("Settings")}
-        {saved && <span className="text-[10px] text-emerald-300">{t("Saved")}</span>}
+        {saved && <span className="text-[10px] text-status-ok">{t("Saved")}</span>}
       </p>
 
       {extension.server && (
@@ -421,20 +421,20 @@ export function ExtensionView({ id }: { id: string }) {
               </button>
             </div>
             <div className="h-1 w-full overflow-hidden rounded-full bg-line">
-              <div className="h-full w-2/3 animate-pulse rounded-full bg-accent transition-all duration-300" />
+              <div className="h-full w-2/3 wide-pulse rounded-full bg-accent transition-all duration-300" />
             </div>
           </div>
         )}
 
         {failure && (
-          <div className="wide-enter-fade mt-4 flex items-center justify-between gap-2 rounded-md border border-rose-500/20 bg-rose-500/10 p-3 text-[12px] text-rose-300">
+          <div className="wide-enter-fade mt-4 flex items-center justify-between gap-2 rounded-md border border-status-error/20 bg-status-error/10 p-3 text-[12px] text-status-error">
             <span>{t(failure)}</span>
             <button
               type="button"
               onClick={() => useExtensions.setState({ error: null })}
               title={t("Dismiss")}
               aria-label={t("Dismiss")}
-              className="rounded p-1 text-rose-300/80 hover:bg-rose-500/20 hover:text-rose-200"
+              className="rounded p-1 text-status-error/80 hover:bg-status-error/20 hover:text-status-error"
             >
               <X className="size-3.5" strokeWidth={2} />
             </button>
@@ -478,7 +478,7 @@ export function ExtensionView({ id }: { id: string }) {
                   <span className="text-fg-faint">{t("None, highlighting only.")}</span>
                 ) : serverRecord?.state === "present" || serverRecord?.state === "installed" ? (
                   <span className="flex flex-col gap-1">
-                    <span className="text-emerald-300">
+                    <span className="text-status-ok">
                       {serverRecord.state === "installed"
                         ? t("{name} was installed on this machine.", { name: serverRecord.command })
                         : t("{name} was already on this machine.", { name: serverRecord.command })}

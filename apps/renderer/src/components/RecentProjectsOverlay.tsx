@@ -159,7 +159,7 @@ export function RecentProjectsOverlay() {
                         </span>
                       )}
                       {item.missing && (
-                        <span className="rounded bg-status-danger/20 px-1 py-0.2 text-[9px] text-status-danger">
+                        <span className="rounded bg-status-error/15 px-1 py-0.2 text-[9px] text-status-error">
                           Missing
                         </span>
                       )}

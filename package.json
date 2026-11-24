@@ -1,6 +1,6 @@
 {
   "name": "wide-app",
-  "version": "0.6191126",
+  "version": "0.7241126",
   "description": "Prompt-only AI workspace for building and securing web projects without a full IDE",
   "private": true,
   "workspaces": [

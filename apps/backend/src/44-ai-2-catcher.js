@@ -130,6 +130,14 @@ async function aiExecuteCatcherControl(input = {}, send) {
     return JSON.stringify({ ok: false, certPath: PROXY_CA_CERT(), error: "Automatic CA trust is supported on Windows; import cert manually on this OS." }, null, 2);
   }
 
+  if (act === "ca_untrust") {
+    if (typeof aiControlInvoke === "function") {
+      const res = await aiControlInvoke("proxy:caUntrust");
+      return JSON.stringify(res ?? { ok: false, error: "CA untrust failed." }, null, 2);
+    }
+    return JSON.stringify({ ok: false, error: "proxy:caUntrust handler unavailable." }, null, 2);
+  }
+
   if (act === "get_traffic") {
     return aiExecuteCatcherTrafficQuery({ limit: input.limit || 20 });
   }

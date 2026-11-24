@@ -90,14 +90,14 @@ export function streamerMask(): Extension {
     ".cm-streamer-mask": {
       filter: "blur(5px)",
       userSelect: "none",
-      backgroundColor: "rgba(168, 85, 247, 0.25)",
+      backgroundColor: "color-mix(in srgb, var(--accent) 22%, transparent)",
       borderRadius: "3px",
       cursor: "pointer",
       transition: "filter 0.15s ease, background-color 0.15s ease",
     },
     ".cm-streamer-mask:hover": {
       filter: "none",
-      backgroundColor: "rgba(168, 85, 247, 0.1)",
+      backgroundColor: "color-mix(in srgb, var(--accent) 10%, transparent)",
     },
   });
 

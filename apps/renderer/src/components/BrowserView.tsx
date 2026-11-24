@@ -446,7 +446,7 @@ export function BrowserView() {
         <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-line bg-panel px-2 focus-within:border-accent">
           {activeUrl && (
             <Lock
-              className={cn("size-3 shrink-0", secure ? "text-emerald-400" : "text-fg-faint")}
+              className={cn("size-3 shrink-0", secure ? "text-status-ok" : "text-fg-faint")}
               strokeWidth={1.75}
               aria-label={secure ? t("Secure") : t("Not secure")}
             />
@@ -491,7 +491,7 @@ export function BrowserView() {
           aria-pressed={proxyRunning}
           className={cn(
             "ml-1 rounded-sm p-1 transition-colors duration-100 hover:bg-hover",
-            proxyRunning ? "text-emerald-400" : "text-fg-dim hover:text-fg",
+            proxyRunning ? "text-status-ok" : "text-fg-dim hover:text-fg",
           )}
         >
           <Radar className="size-4" strokeWidth={1.75} />
@@ -505,7 +505,7 @@ export function BrowserView() {
             aria-label={t("Scope this host")}
             className={cn(
               "rounded-sm p-1 transition-colors duration-100 hover:bg-hover",
-              inScope ? "text-emerald-400" : "text-fg-dim hover:text-fg",
+              inScope ? "text-status-ok" : "text-fg-dim hover:text-fg",
             )}
           >
             <ShieldCheck className="size-4" strokeWidth={1.75} />
@@ -517,10 +517,10 @@ export function BrowserView() {
             onClick={addSecurityToFindings}
             title={`${issues.map((i) => i.title).join(", ")} — ${t("add to Findings")}`}
             aria-label={t("Security issues")}
-            className="relative rounded-sm p-1 text-amber-400 transition-colors duration-100 hover:bg-hover"
+            className="relative rounded-sm p-1 text-status-warn transition-colors duration-100 hover:bg-hover"
           >
             <ShieldAlert className="size-4" strokeWidth={1.75} />
-            <span className="absolute -right-0.5 -top-0.5 rounded-full bg-amber-500 px-1 text-[8px] font-bold leading-tight text-black">{issues.length}</span>
+            <span className="absolute -right-0.5 -top-0.5 rounded-full bg-status-warn px-1 text-[8px] font-bold leading-tight text-canvas">{issues.length}</span>
           </button>
         )}
         {activeUrl && (
@@ -540,7 +540,7 @@ export function BrowserView() {
             onClick={() => useBrowserData.getState().toggleBookmark(activeUrl, active?.title || activeUrl)}
             title={isBookmarked ? t("Remove bookmark") : t("Bookmark this page")}
             aria-label={t("Bookmark")}
-            className={cn("rounded-sm p-1 transition-colors duration-100 hover:bg-hover", isBookmarked ? "text-amber-400" : "text-fg-dim hover:text-fg")}
+            className={cn("rounded-sm p-1 transition-colors duration-100 hover:bg-hover", isBookmarked ? "text-status-warn" : "text-fg-dim hover:text-fg")}
           >
             <Star className="size-4" strokeWidth={1.75} fill={isBookmarked ? "currentColor" : "none"} />
           </button>
@@ -663,7 +663,7 @@ export function BrowserView() {
               className="flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] hover:bg-hover"
             >
               {s.bookmarked ? (
-                <Star className="size-3 shrink-0 text-amber-400" strokeWidth={1.75} fill="currentColor" />
+                <Star className="size-3 shrink-0 text-status-warn" strokeWidth={1.75} fill="currentColor" />
               ) : (
                 <span className="size-3 shrink-0" />
               )}
@@ -742,7 +742,7 @@ export function BrowserView() {
 
       {download && (
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-panel px-3 py-1.5 text-[11px]">
-          <Download className="size-3.5 shrink-0 text-emerald-400" strokeWidth={1.75} />
+          <Download className="size-3.5 shrink-0 text-status-ok" strokeWidth={1.75} />
           <span className="min-w-0 flex-1 truncate text-fg" title={download.path || download.url}>
             {download.path || download.url}
           </span>

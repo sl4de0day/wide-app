@@ -127,7 +127,7 @@ export function WsClient({ req }: { req: PitcherRequest }) {
         ) : (
           frames.map((f, i) => (
             <div key={i} className={cn("flex gap-2 border-b border-line/30 py-0.5", f.dir === "sys" && "text-fg-faint")}>
-              <span className={cn("shrink-0", f.dir === "up" ? "text-sky-400" : f.dir === "down" ? "text-emerald-400" : "text-fg-faint")}>{f.dir === "up" ? "▲" : f.dir === "down" ? "▼" : "•"}</span>
+              <span className={cn("shrink-0", f.dir === "up" ? "text-status-info" : f.dir === "down" ? "text-status-ok" : "text-fg-faint")}>{f.dir === "up" ? "▲" : f.dir === "down" ? "▼" : "•"}</span>
               <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-fg-dim">{f.text}</span>
             </div>
           ))

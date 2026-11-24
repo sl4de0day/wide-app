@@ -248,7 +248,7 @@ async function handleSidecarMessage(msg) {
       } else if (method === 'shell:showItemInFolder') {
         shell.showItemInFolder(params.path);
       } else if (method === 'shell:openExternal') {
-        if (params.url) shell.openExternal(params.url);
+        if (params.url) await shell.openExternal(params.url);
       } else if (method === 'shell:trashItem') {
         if (params.path) await shell.trashItem(params.path);
       } else if (method === 'browser:proxy') {
@@ -337,7 +337,7 @@ async function handleSidecarMessage(msg) {
             const isOpt = ROOT.startsWith('/opt');
             const flag = updatePath.endsWith('.zst') ? '--zstd' : '-z';
             if (isOpt && fs.existsSync('/usr/bin/pkexec')) {
-              cp.spawn('pkexec', ['tar', flag, '-xf', updatePath, '-C', '/opt/wide'], {
+              cp.spawn('pkexec', ['tar', flag, '-xf', updatePath, '-C', ROOT], {
                 detached: true,
                 stdio: 'ignore',
               }).unref();
@@ -358,6 +358,16 @@ async function handleSidecarMessage(msg) {
         } catch (err) {
           result = { ok: false, error: String((err && err.message) || err) };
         }
+      } else if (method === 'app:getDiagnostics') {
+        result = {
+          ok: true,
+          platform: process.platform,
+          arch: process.arch,
+          pid: process.pid,
+          uptimeMs: Math.round(process.uptime() * 1000),
+          version: app.getVersion(),
+          logTail: '',
+        };
       }
 
       sendToSidecar({ t: 'hostReply', id, result });
@@ -418,46 +428,12 @@ ipcMain.on('webview-message', async (_event, msg) => {
         try {
           if (!dbg.isAttached()) dbg.attach('1.3');
           const res = await dbg.sendCommand(cdpMethod, cdpParams || {});
-          replyToRenderer(replyId, res);
+          replyToRenderer(replyId, { ok: true, result: res });
         } catch (err) {
-          replyToRenderer(replyId, null, err);
+          replyToRenderer(replyId, { ok: false, error: String((err && err.message) || err) });
         }
       } else {
-        replyToRenderer(replyId, null, new Error('Tab not found'));
-      }
-      return;
-    }
-
-    if (channel === 'ide:launch') {
-      const [params] = args;
-      const projectPath = (params && params.projectPath) || '';
-      const candidates = [];
-      if (process.env.LOCALAPPDATA) {
-        candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'Wide IDE', 'wide.exe'));
-        candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'Wide', 'wide.exe'));
-        candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'wide-ide', 'wide-ide.exe'));
-      }
-      if (process.env.PROGRAMFILES) {
-        candidates.push(path.join(process.env.PROGRAMFILES, 'Wide IDE', 'wide.exe'));
-        candidates.push(path.join(process.env.PROGRAMFILES, 'Wide', 'wide.exe'));
-      }
-      candidates.push(path.resolve(ROOT, '..', 'wide', 'dist', 'wide', 'wide.exe'));
-      candidates.push(path.resolve(ROOT, '..', 'wide-ide', 'dist', 'wide', 'wide.exe'));
-
-      const exe = candidates.find((c) => fs.existsSync(c));
-      if (!exe) {
-        replyToRenderer(replyId, { ok: false, error: 'Wide IDE executable was not found on this computer.' });
-        return;
-      }
-      try {
-        const child = cp.spawn(exe, projectPath ? [projectPath] : [], {
-          detached: true,
-          stdio: 'ignore',
-        });
-        child.unref();
-        replyToRenderer(replyId, { ok: true, path: exe });
-      } catch (err) {
-        replyToRenderer(replyId, { ok: false, error: err.message });
+        replyToRenderer(replyId, { ok: false, error: 'Tab not found' });
       }
       return;
     }
@@ -512,7 +488,7 @@ ipcMain.on('webview-message', async (_event, msg) => {
       closeBrowserTab(msg.tabId);
     } else if (cmd === 'consume-open-path') {
       if (pendingOpenPath) {
-        emitToRenderer('host:openPath', pendingOpenPath);
+        emitToRenderer('host:openPath', { path: pendingOpenPath });
         pendingOpenPath = null;
       }
     }

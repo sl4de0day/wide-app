@@ -37,7 +37,7 @@ export function CodeGenDialog({ req, vars, onClose }: { req: PitcherRequest; var
             </button>
           ))}
           <button type="button" onClick={copy} className="ml-auto flex items-center gap-1 rounded-sm border border-line px-2 py-0.5 text-[11px] text-fg-dim hover:bg-hover hover:text-fg">
-            {copied ? <Check className="size-3 text-emerald-400" strokeWidth={2} /> : <Copy className="size-3" strokeWidth={2} />}
+            {copied ? <Check className="size-3 text-status-ok" strokeWidth={2} /> : <Copy className="size-3" strokeWidth={2} />}
             {copied ? t("Copied") : t("Copy")}
           </button>
         </div>
