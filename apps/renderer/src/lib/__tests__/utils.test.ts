@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { basename, dirname, extname, formatBytes, getRelativePath, normalisePath } from "@/lib/utils";
+import { basename, cn, dirname, extname, formatBytes, getRelativePath, normalisePath } from "@/lib/utils";
 import { diffCounts, lineDiff } from "@/lib/lineDiff";
 
 describe("path helpers", () => {
@@ -63,5 +63,21 @@ describe("line diff", () => {
   it("reports a replaced line as one add and one remove", () => {
     const counts = diffCounts(lineDiff("a\nold\nc", "a\nnew\nc"));
     expect(counts).toEqual({ added: 1, removed: 1 });
+  });
+});
+
+describe("cn with design tokens", () => {
+  it("keeps a token font size next to a text colour", () => {
+    expect(cn("text-body", "text-fg")).toBe("text-body text-fg");
+  });
+
+  it("lets a later token font size replace an earlier one", () => {
+    expect(cn("text-caption text-fg", "text-reading")).toBe("text-fg text-reading");
+  });
+
+  it("merges token sizes and radii like built-in ones", () => {
+    expect(cn("size-icon", "size-icon-lg")).toBe("size-icon-lg");
+    expect(cn("h-row-sm", "h-row")).toBe("h-row");
+    expect(cn("rounded-lg", "rounded-2xl")).toBe("rounded-2xl");
   });
 });

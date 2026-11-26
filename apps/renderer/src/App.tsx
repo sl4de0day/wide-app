@@ -1,13 +1,14 @@
-import { ChevronLeft, Database, Settings, ShieldAlert, X } from "lucide-react";
+import { ChevronLeft, ShieldAlert, X } from "lucide-react";
 import { Suspense, lazy, useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { AiPanel } from "./panels/AiPanel";
+import { Sidebar, startConversation } from "./components/Sidebar";
+import { useLayout } from "./stores/layout";
 
 const AiChatView = lazy(() => import("./components/AiChatView").then((m) => ({ default: m.AiChatView })));
 const DatabaseView = lazy(() => import("./components/DatabaseView").then((m) => ({ default: m.DatabaseView })));
-const DatabasePanel = lazy(() => import("./panels/DatabasePanel").then((m) => ({ default: m.DatabasePanel })));
 const DatabaseConnectionModal = lazy(() => import("./panels/DatabasePanel").then((m) => ({ default: m.DatabaseConnectionModal })));
+const AiBrowserDrawer = lazy(() => import("./components/AiBrowserDrawer").then((m) => ({ default: m.AiBrowserDrawer })));
 const SettingsView = lazy(() => import("./components/SettingsView").then((m) => ({ default: m.SettingsView })));
 import { CommandPalette } from "./components/CommandPalette";
 import { RecentProjectsOverlay } from "./components/RecentProjectsOverlay";
@@ -28,13 +29,13 @@ import { Toasts } from "./components/Toasts";
 import { toast } from "./stores/toast";
 import { cn } from "./lib/utils";
 import { CrashReportDialog } from "./components/CrashReportDialog";
-import { AiBrowserDrawer } from "./components/AiBrowserDrawer";
 import { useAiBrowser } from "./stores/aiBrowser";
 import { useTelemetry } from "./stores/telemetry";
 import { useDiagnostics } from "./stores/diagnostics";
 import { subscribeFindingsProject } from "./stores/findings";
 import { AI_CHAT_PATH, DATABASE_PATH, SETTINGS_PATH, useEditor } from "./stores/editor";
 import { subscribeAiEvents, subscribeAiPulls, useAi } from "./stores/ai";
+import { subscribeAiQueue } from "./stores/aiQueue";
 import { subscribeProxyTraffic } from "./stores/proxy";
 import { subscribeOast } from "./stores/oast";
 import { subscribeDiscordPresence } from "./stores/discordPresence";
@@ -147,7 +148,8 @@ export default function App() {
 
   const settingsOpen = useEditor((state) => state.activePath === SETTINGS_PATH);
   const databaseOpen = useEditor((state) => state.activePath === DATABASE_PATH);
-  const [sidebarTab, setSidebarTab] = useState<"ai" | "db">("ai");
+  const sidebarCollapsed = useLayout((state) => state.sidebarCollapsed);
+  const browserDrawerOpen = useAiBrowser((state) => state.drawerOpen);
   const booting = useUpdate((state) => state.booting);
 
   const closeTab = useEditor((state) => state.closeTab);
@@ -364,6 +366,7 @@ export default function App() {
 
   useEffect(() => subscribeAiEvents(), []);
   useEffect(() => subscribeAiPulls(), []);
+  useEffect(() => subscribeAiQueue(), []);
 
 
   useEffect(() => subscribeProxyTraffic(), []);
@@ -451,8 +454,8 @@ export default function App() {
   useEffect(() => {
     const handleOpenPanel = (e: Event) => {
       const panelId = (e as CustomEvent<string>).detail;
-      if (panelId === "db" || panelId === "database") setSidebarTab("db");
-      else if (panelId === "ai") setSidebarTab("ai");
+      if (panelId === "db" || panelId === "database") useLayout.getState().setSidebarView("database");
+      else if (panelId === "ai") useLayout.getState().setSidebarView("chats");
     };
     window.addEventListener("wide:open-panel", handleOpenPanel);
     return () => window.removeEventListener("wide:open-panel", handleOpenPanel);
@@ -471,10 +474,11 @@ export default function App() {
       { id: "file.closeOthers", title: "Close Other Tabs", group: "File", run: () => { const a = useEditor.getState().activePath; if (a) void requestCloseOthers(a); } },
       { id: "file.closeAll", title: "Close All Tabs", group: "File", run: () => void requestCloseAll() },
       { id: "view.settings", title: "Settings", group: "View", key: "ctrl+,", run: () => useEditor.getState().openSettings() },
-      { id: "view.database", title: "Database", group: "View", run: () => { setSidebarTab("db"); useEditor.getState().openDatabase(); } },
+      { id: "view.database", title: "Database", group: "View", run: () => { useLayout.getState().setSidebarView("database"); useEditor.getState().openDatabase(); } },
+      { id: "view.sidebar", title: "Toggle sidebar", group: "View", key: "ctrl+b", run: () => useLayout.getState().toggleSidebar() },
       { id: "file.openFolder", title: "Open folder", group: "File", key: "ctrl+o", run: () => void useWorkspace.getState().openFolder() },
       { id: "file.openRecent", title: "Open Recent Project…", group: "File", key: "ctrl+r", run: () => useRecentProjects.getState().open() },
-      { id: "view.ai", title: "AI Assistant", group: "View", when: () => has("ai-assistant"), run: () => setSidebarTab("ai") },
+      { id: "view.ai", title: "AI Assistant", group: "View", when: () => has("ai-assistant"), run: () => useLayout.getState().setSidebarView("chats") },
       { id: "ai.newChat", title: "New AI conversation", group: "AI", key: "ctrl+l", when: () => has("ai-assistant"), run: async () => { const newId = await useAi.getState().newSession(); if (newId) useEditor.getState().openAiChat(newId, t("New conversation")); } },
       { id: "ai.review", title: "Toggle: Review AI edits before applying", group: "AI", when: () => has("ai-assistant"), run: () => useAiEdits.getState().setReview(!useAiEdits.getState().reviewEnabled) },
       { id: "ai.ghost", title: "Toggle: Inline AI completions (ghost text)", group: "AI", when: () => has("ai-assistant"), run: () => useSettings.getState().set({ aiGhostText: !useSettings.getState().aiGhostText }) },
@@ -512,50 +516,7 @@ export default function App() {
       <SssfDegradedNotice />
       <TitleBar />
       <div className="flex min-h-0 flex-1">
-        <div className="flex w-72 shrink-0 flex-col border-r border-line bg-panel">
-          <div className="flex shrink-0 border-b border-line bg-chrome p-1 text-[11px] font-medium">
-            <button
-              type="button"
-              onClick={() => setSidebarTab("ai")}
-              className={cn(
-                "flex-1 rounded px-2 py-1 transition-colors",
-                sidebarTab === "ai" ? "bg-selected text-fg-bright" : "text-fg-dim hover:text-fg"
-              )}
-            >
-              {t("AI Assistant")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSidebarTab("db")}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1 rounded px-2 py-1 transition-colors",
-                sidebarTab === "db" ? "bg-selected text-fg-bright" : "text-fg-dim hover:text-fg"
-              )}
-            >
-              <Database className="size-3" />
-              {t("Database")}
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {sidebarTab === "db" ? (
-              <Suspense fallback={null}>
-                <DatabasePanel />
-              </Suspense>
-            ) : (
-              <AiPanel />
-            )}
-          </div>
-          <div className="flex shrink-0 items-center border-t border-line px-3 py-2 bg-chrome">
-            <button
-              type="button"
-              onClick={() => useEditor.getState().openSettings()}
-              className="flex items-center gap-2 text-[12px] text-fg-dim hover:text-fg transition-colors"
-            >
-              <Settings className="size-3.5" />
-              <span>{t("Settings")}</span>
-            </button>
-          </div>
-        </div>
+        {!sidebarCollapsed && <Sidebar />}
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
           {settingsOpen ? (
@@ -617,10 +578,7 @@ export default function App() {
                 <p className="text-[13px] text-fg-faint">{t("Select a conversation from the left or create a new one.")}</p>
                 <button
                   type="button"
-                  onClick={async () => {
-                    const id = await useAi.getState().newSession();
-                    if (id) useEditor.getState().openAiChat(id, t("New conversation"));
-                  }}
+                  onClick={() => void startConversation(t("New conversation"))}
                   className="mt-4 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent/90"
                 >
                   {t("New conversation")}
@@ -629,6 +587,11 @@ export default function App() {
             </div>
           )}
         </main>
+        {browserDrawerOpen && (
+          <Suspense fallback={null}>
+            <AiBrowserDrawer />
+          </Suspense>
+        )}
       </div>
       <RecentProjectsOverlay />
       <CommandPalette />
@@ -638,7 +601,6 @@ export default function App() {
       <PromptHost />
       <Toasts />
       <CrashReportDialog />
-      <AiBrowserDrawer />
       <DatabaseModalHost />
     </div>
   );

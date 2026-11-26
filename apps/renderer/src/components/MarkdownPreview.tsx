@@ -14,7 +14,7 @@ body {
   max-width: 920px;
   font: 14px/1.65 var(--font-ui, system-ui, -apple-system, sans-serif);
   color: var(--fg, #d8dee9);
-  background: var(--canvas, #2e3440);
+  background: var(--canvas, #3b4252);
 }
 h1, h2 {
   border-bottom: 1px solid var(--line, rgba(255,255,255,0.1));
@@ -88,8 +88,8 @@ export function MarkdownPreview({ sourcePath }: { sourcePath: string }) {
       html = "";
     }
     const styles = typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
-    const canvas = styles?.getPropertyValue("--canvas") || "#2e3440";
-    const panel = styles?.getPropertyValue("--panel") || "#2e3440";
+    const canvas = styles?.getPropertyValue("--canvas") || "#3b4252";
+    const panel = styles?.getPropertyValue("--panel") || "#27272a";
     const fg = styles?.getPropertyValue("--fg") || "#d8dee9";
     const fgBright = styles?.getPropertyValue("--fg-bright") || "#eceff4";
     const fgDim = styles?.getPropertyValue("--fg-dim") || "#9aa6bd";

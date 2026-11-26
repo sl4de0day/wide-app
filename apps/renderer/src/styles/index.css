@@ -28,7 +28,7 @@
 [data-theme="default"] {
   --mono-1000: #232831;
   --mono-950: #292f3a;
-  --mono-900: #2e3440;
+  --mono-900: #27272a;
   --mono-850: #353b49;
   --mono-800: #3b4252;
   --mono-750: #434c5e;
@@ -50,7 +50,7 @@
   --hover: #d8dee914;
   --selected: #d8dee926;
   --active: #d8dee933;
-  --line: #d8dee91a;
+  --line: #d8dee914;
   --line-strong: #d8dee933;
 
   --fg: #d8dee9;
@@ -105,6 +105,9 @@
   --h-statusbar: 26px;
   --w-activitybar: 44px;
   --h-row: 26px;
+  --h-nav-row: 34px;
+  --w-sidebar: 288px;
+  --w-reading: 760px;
   --radius: 8px;
 
   --font-ui: "Outfit", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
@@ -139,7 +142,7 @@
   --hover: #c0caf514;
   --selected: #c0caf526;
   --active: #c0caf533;
-  --line: #c0caf51a;
+  --line: #c0caf514;
   --line-strong: #c0caf533;
 
   --fg: #c0caf5;
@@ -210,7 +213,7 @@
   --hover: #abb2bf14;
   --selected: #abb2bf26;
   --active: #abb2bf33;
-  --line: #abb2bf1a;
+  --line: #abb2bf14;
   --line-strong: #abb2bf33;
 
   --fg: #abb2bf;
@@ -281,7 +284,7 @@
   --hover: #b9bed514;
   --selected: #b9bed526;
   --active: #b9bed533;
-  --line: #b9bed51a;
+  --line: #b9bed514;
   --line-strong: #b9bed533;
 
   --fg: #b9bed5;
@@ -381,6 +384,31 @@
   --font-sans: var(--font-ui);
   --font-ui: var(--font-ui);
   --font-mono: var(--font-mono);
+
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-meta: 13px;
+  --text-meta--line-height: 18px;
+  --text-body: 14px;
+  --text-body--line-height: 21px;
+  --text-reading: 15px;
+  --text-reading--line-height: 24px;
+  --text-title: 18px;
+  --text-title--line-height: 24px;
+
+  --spacing-row: var(--h-nav-row);
+  --spacing-row-sm: 28px;
+  --spacing-icon-sm: 14px;
+  --spacing-icon: 16px;
+  --spacing-icon-lg: 18px;
+  --spacing-sidebar: var(--w-sidebar);
+  --spacing-reading: var(--w-reading);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
 }
 
 .drag-region {
@@ -444,8 +472,9 @@ body {
   background: var(--canvas);
   color: var(--fg);
   font-family: var(--font-ui);
-  font-size: 13px;
-  letter-spacing: -0.008em;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
@@ -458,21 +487,6 @@ button {
   font-family: inherit;
 }
 
-.rounded-sm {
-  border-radius: 6px;
-}
-
-.rounded-md {
-  border-radius: 8px;
-}
-
-.rounded-lg {
-  border-radius: 12px;
-}
-
-.rounded-xl {
-  border-radius: 14px;
-}
 
 .xterm .composition-view {
   background: var(--raised);
